@@ -59,7 +59,6 @@ final class SearchState: ObservableObject {
             self.isSwitching = false
             if case .failure(let error) = outcome {
                 self.errorMessage = error.localizedDescription
-                self.hidePanel = self.hidePanel // keep state intact
                 self.showError()
             }
         }
@@ -229,7 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.menu = menu
         statusItem = item
         state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
-        state.showPanel = { [weak self] in self?.openPanel() }
+        state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
     }
 
     @objc private func changeShortcut(_ sender: NSMenuItem) {
@@ -319,9 +318,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else { presentPanel() }
     }
 
-    private func presentPanel() {
-        state.query = ""
-        state.refresh()
+    private func presentPanel(resetSearch: Bool = true) {
+        if resetSearch {
+            state.query = ""
+            state.refresh()
+        }
         if panel == nil {
             let window = SearchPanel(contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
                                      styleMask: [.titled, .fullSizeContentView],
