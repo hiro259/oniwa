@@ -86,16 +86,20 @@ final class SpaceReader {
         windowsFn = symbol("CGSCopySpacesForWindows", WindowsFn.self)
     }
 
-    func displays() -> [DisplayGroup] {
+    func displays(includeAppNames: Bool = true) -> [DisplayGroup] {
         guard let connectionFn, let layoutFn,
               let raw = layoutFn(connectionFn()) as? [[String: Any]] else { return [] }
 
-        let ownerNames = windowOwners(connection: connectionFn())
+        // Switching polls only Space IDs: querying every window on every poll
+        // would add avoidable latency on a Mac with many open windows.
+        let ownerNames = includeAppNames ? windowOwners(connection: connectionFn()) : [:]
         return raw.enumerated().compactMap { displayIndex, display in
             guard let displayID = display["Display Identifier"] as? String,
                   let spaceDicts = display["Spaces"] as? [[String: Any]] else { return nil }
             let name = displayName(displayID, fallback: displayIndex + 1)
-            let current = (display["Current Space"] as? [String: Any])?["ManagedSpaceID"] as? NSNumber
+            let currentDictionary = display["Current Space"] as? [String: Any]
+            let current = (currentDictionary?["ManagedSpaceID"] as? NSNumber)
+                ?? (currentDictionary?["id64"] as? NSNumber)
             let spaces: [SpaceEntry] = spaceDicts.enumerated().compactMap { index, record in
                 guard let number = (record["ManagedSpaceID"] as? NSNumber)
                         ?? (record["id64"] as? NSNumber) else { return nil }
@@ -160,9 +164,13 @@ final class SpaceReader {
 }
 
 /// Uses standard Mission Control shortcuts via System Events, NOT private writes.
-/// Switching can take several steps and may require Automation permission.
+/// The private SkyLight API is strictly read-only. A jump stops rather than
+/// continuing blindly if a Space disappears, gets reordered, or the observed
+/// transition does not land on the expected immediate neighbor.
 final class SpaceSwitcher {
     private let queue = DispatchQueue(label: "com.hiro259.oniwa.switch", qos: .userInitiated)
+    private let pollInterval: TimeInterval = 0.06
+    private let transitionTimeout: TimeInterval = 3.0
 
     func switchTo(_ target: SpaceEntry, completion: @escaping (Result<Void, Error>) -> Void) {
         queue.async {
@@ -173,43 +181,125 @@ final class SpaceSwitcher {
 
     private func performSwitch(_ target: SpaceEntry) -> Result<Void, Error> {
         let reader = SpaceReader.shared
-        guard let group = reader.displays().first(where: { $0.id == target.displayID }),
-              let targetIndex = group.spaces.firstIndex(where: { $0.systemID == target.systemID })
-        else { return .failure(SwitchFailure("That Space no longer exists. Reopen search.")) }
+        let initialDisplays = reader.displays(includeAppNames: false)
+        guard let initial = initialDisplays.first(where: { $0.id == target.displayID }),
+              initial.spaces.contains(where: { $0.systemID == target.systemID })
+        else {
+            return .failure(SwitchFailure(
+                "選択したSpaceが見つかりません。検索パネルを更新してください。"))
+        }
 
-        // With separate Spaces per display, the arrow shortcut follows cursor focus.
-        guard let frame = reader.displayBounds(for: target.displayID) else {
-            return .failure(SwitchFailure("Cannot identify target display. No switch was attempted."))
+        let originalOrder = initial.spaces.map(\.systemID)
+        guard let originalCurrentID = initial.currentID else {
+            return .failure(SwitchFailure("現在表示中のSpaceを確認できません。"))
         }
-        CGWarpMouseCursorPosition(CGPoint(x: frame.midX, y: frame.midY))
-        Thread.sleep(forTimeInterval: 0.07)
-        guard let current = reader.displays().first(where: { $0.id == target.displayID }),
-              let currentIndex = current.spaces.firstIndex(where: { $0.isCurrent })
-        else { return .failure(SwitchFailure("Cannot determine the current Space.")) }
-        let delta = targetIndex - currentIndex
-        if delta == 0 { return .success(()) }
-        for _ in 0..<abs(delta) {
-            let previous = reader.displays().first(where: { $0.id == target.displayID })?.currentID
-            let keyCode = delta > 0 ? 124 : 123
-            var error: NSDictionary?
-            let script = NSAppleScript(source:
-                "tell application \"System Events\" to key code \(keyCode) using control down")
-            _ = script?.executeAndReturnError(&error)
-            if let error {
-                return .failure(SwitchFailure("System Events failed: \(error). Check Automation permission."))
-            }
-            var changed = false
-            for _ in 0..<40 {
-                Thread.sleep(forTimeInterval: 0.06)
-                let now = reader.displays().first(where: { $0.id == target.displayID })?.currentID
-                if now != nil && now != previous { changed = true; break }
-            }
-            if !changed { return .failure(SwitchFailure("Space transition was not confirmed.")) }
+        // No reason to manipulate the cursor when that desktop is already visible.
+        if originalCurrentID == target.systemID { return .success(()) }
+
+        guard let displayBounds = reader.displayBounds(for: target.displayID) else {
+            return .failure(SwitchFailure(
+                "移動先のモニターを識別できません。画面構成を確認してください。"))
         }
-        let arrived = reader.displays().first(where: { $0.id == target.displayID })?.currentID
-        return arrived == target.systemID
-            ? .success(())
-            : .failure(SwitchFailure("Switched, but did not reach the selected Space."))
+
+        // The built-in Ctrl+arrow Space shortcut acts on the display under the
+        // pointer on Macs with "Displays have separate Spaces" enabled.
+        // If the pointer is already on that display, do not needlessly warp it.
+        let pointer = CGEvent(source: nil)?.location
+        if pointer == nil || !displayBounds.contains(pointer!) {
+            let error = CGWarpMouseCursorPosition(
+                CGPoint(x: displayBounds.midX, y: displayBounds.midY))
+            guard error == .success else {
+                return .failure(SwitchFailure("対象モニターにカーソルを移せませんでした。"))
+            }
+            Thread.sleep(forTimeInterval: 0.07)
+        }
+
+        // Each successful step must land on precisely the neighboring Space.
+        // Re-read both the ordering and the active Space before the next step.
+        // We intentionally do not chase an arbitrary new position if the user
+        // changes Spaces or the system rearranges the layout during navigation.
+        for _ in 0..<originalOrder.count {
+            guard let live = reader.displays(includeAppNames: false)
+                .first(where: { $0.id == target.displayID }) else {
+                return .failure(SwitchFailure("対象モニターが接続解除されました。"))
+            }
+            let order = live.spaces.map(\.systemID)
+            guard order == originalOrder else {
+                return .failure(SwitchFailure(
+                    "移動中にSpaceの順序が変わりました。安全のため中断しました。"))
+            }
+            guard let current = live.currentID else {
+                return .failure(SwitchFailure("現在のSpaceを確認できなくなりました。"))
+            }
+            let decision: SpaceNavigation.Decision
+            do {
+                decision = try SpaceNavigation.nextStep(
+                    orderedSpaceIDs: order, current: current, target: target.systemID)
+            } catch {
+                return .failure(SwitchFailure(
+                    "Spaceの識別情報が変化しました。検索を開き直してください。"))
+            }
+
+            switch decision {
+            case .arrived:
+                return .success(())
+            case let .move(direction, nextSpaceID):
+                let code = direction == .right ? 124 : 123
+                var scriptError: NSDictionary?
+                let script = NSAppleScript(source:
+                    "tell application \"System Events\" to key code \(code) using control down")
+                guard let script else {
+                    return .failure(SwitchFailure("切り替え操作を作成できませんでした。"))
+                }
+                _ = script.executeAndReturnError(&scriptError)
+                if let scriptError {
+                    NSLog("ONIWA: System Events switch error: %@", scriptError)
+                    return .failure(SwitchFailure(
+                        "macOSの操作が許可されませんでした。「プライバシーとセキュリティ」→「オートメーション」でSystem Eventsの許可を確認してください。"))
+                }
+
+                switch waitForNeighbor(
+                    previous: current, expected: nextSpaceID,
+                    displayID: target.displayID, reader: reader
+                ) {
+                case .confirmed: break
+                case .wrongSpace:
+                    return .failure(SwitchFailure(
+                        "予定とは異なるSpaceへ移動しました。これ以上の自動切り替えを停止しました。"))
+                case .disconnected:
+                    return .failure(SwitchFailure("切り替え中にモニターを認識できなくなりました。"))
+                case .timedOut:
+                    return .failure(SwitchFailure(
+                        "Spaceの移動を確認できません。Mission Controlの「左/右の操作スペースに移動」ショートカットが有効か確認してください。"))
+                }
+            }
+        }
+
+        // If the system never acknowledged arrival, never report success.
+        return .failure(SwitchFailure(
+            "Spaceの切り替えを完了できませんでした。"))
+    }
+
+    private enum StepOutcome {
+        case confirmed
+        case wrongSpace
+        case disconnected
+        case timedOut
+    }
+
+    private func waitForNeighbor(previous: UInt64, expected: UInt64,
+                                 displayID: String, reader: SpaceReader) -> StepOutcome {
+        let deadline = Date().addingTimeInterval(transitionTimeout)
+        while Date() < deadline {
+            Thread.sleep(forTimeInterval: pollInterval)
+            guard let display = reader.displays(includeAppNames: false)
+                .first(where: { $0.id == displayID }) else { return .disconnected }
+            guard let now = display.currentID else { continue }
+            if now == expected { return .confirmed }
+            // One unexpected step may indicate a user action or shortcut conflict.
+            if now != previous { return .wrongSpace }
+        }
+        return .timedOut
     }
 
     private struct SwitchFailure: LocalizedError {
