@@ -12,7 +12,7 @@ final class SearchState: ObservableObject {
     @Published var aliasesDraft = ""
     @Published var errorMessage: String?
     @Published var isSwitching = false
-    @Published var shortcutDescription = "⌃⌥⇧ O"
+    @Published var shortcutDescription = "⌥ Space"
     let labels = LabelStore()
     let switcher = SpaceSwitcher()
     var hidePanel: (() -> Void)?
@@ -193,7 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let shortcut = GlobalShortcut()
         shortcut.onPress = { [weak self] in self?.togglePanel() }
         self.shortcut = shortcut
-        state.shortcutDescription = shortcut.preset.title
+        state.shortcutDescription = shortcut.current.title
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "庭"
         let menu = NSMenu()
@@ -201,15 +201,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let shortcutRoot = NSMenuItem(title: "ショートカット", action: nil, keyEquivalent: "")
         let shortcutMenu = NSMenu(title: "ショートカット")
         for preset in GlobalShortcut.Preset.allCases {
-            let option = NSMenuItem(title: preset.title,
+            let option = NSMenuItem(title: preset == .optionSpace ? "⌥ Space（おすすめ）" : preset.title,
                                     action: #selector(changeShortcut(_:)),
                                     keyEquivalent: "")
             option.target = self
             option.representedObject = preset.rawValue
-            option.state = preset == shortcut.preset ? .on : .off
+            option.state = preset.combination == shortcut.current ? .on : .off
             shortcutItems[preset] = option
             shortcutMenu.addItem(option)
         }
+        shortcutMenu.addItem(NSMenuItem.separator())
+        let recorderItem = NSMenuItem(title: "ショートカットを記録…",
+                                      action: #selector(recordShortcut),
+                                      keyEquivalent: "")
+        recorderItem.target = self
+        shortcutMenu.addItem(recorderItem)
         shortcutRoot.submenu = shortcutMenu
         menu.addItem(shortcutRoot)
         let diagnosis = NSMenuItem(title: "ショートカット診断…",
@@ -230,14 +236,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let raw = sender.representedObject as? String,
               let preset = GlobalShortcut.Preset(rawValue: raw),
               let shortcut else { return }
-        if shortcut.register(preset) {
-            state.shortcutDescription = preset.title
-            for (choice, item) in shortcutItems {
-                item.state = choice == preset ? .on : .off
-            }
+        if shortcut.register(preset.combination) {
+            updateShortcutUI()
         } else {
-            showShortcutDiagnosis()
+            showShortcutFailure()
         }
+    }
+
+    private func updateShortcutUI() {
+        guard let shortcut else { return }
+        state.shortcutDescription = shortcut.current.title
+        for (preset, item) in shortcutItems {
+            item.state = preset.combination == shortcut.current ? .on : .off
+        }
+    }
+
+    @objc private func recordShortcut() {
+        guard let shortcut else { return }
+        guard shortcut.beginRecording() else {
+            showShortcutFailure()
+            return
+        }
+
+        let recorder = ShortcutRecorderView(frame: NSRect(x: 0, y: 0, width: 390, height: 102))
+        let alert = NSAlert()
+        alert.messageText = "ショートカットを記録"
+        alert.informativeText = """
+        使いたいキーをそのまま押してください。⌘・⌃・⌥のいずれかが必要です。
+        初期候補は ⌥ Space。保存できない場合は元のキーに戻します。
+        """
+        alert.alertStyle = .informational
+        alert.accessoryView = recorder
+        alert.addButton(withTitle: "設定する")
+        alert.addButton(withTitle: "キャンセル")
+        DispatchQueue.main.async {
+            alert.window.makeFirstResponder(recorder)
+        }
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else {
+            _ = shortcut.endRecording(nil)
+            updateShortcutUI()
+            return
+        }
+        guard let candidate = recorder.recorded else {
+            _ = shortcut.endRecording(nil)
+            let warning = NSAlert()
+            warning.messageText = "キーが記録されていません"
+            warning.informativeText = "記録欄をクリックしてキーの組み合わせを押してください。"
+            warning.runModal()
+            return
+        }
+        if shortcut.endRecording(candidate) {
+            updateShortcutUI()
+        } else {
+            updateShortcutUI()
+            showShortcutFailure()
+        }
+    }
+
+    private func showShortcutFailure() {
+        let alert = NSAlert()
+        alert.messageText = "ショートカットの設定に失敗しました"
+        alert.informativeText = shortcut?.registrationError ?? "macOSまたは別のアプリと競合している可能性があります。"
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     @objc private func showShortcutDiagnosis() {
