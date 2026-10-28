@@ -39,6 +39,7 @@ final class GlobalShortcut {
     private static let preferenceKey = "oniwa.hotkeyPreset.v1"
     private var eventHandler: EventHandlerRef?
     private var hotKey: EventHotKeyRef?
+    private var activeIdentifier: UInt32 = 0
     var onPress: (() -> Void)?
     private(set) var registrationError: String?
     private(set) var receivedCount = 0
@@ -88,7 +89,7 @@ final class GlobalShortcut {
         if preset == choice && hotKey != nil { return true }
 
         var candidate: EventHotKeyRef?
-        let identifier = UInt32(hotKey == nil ? 1 : 2)
+        let identifier: UInt32 = activeIdentifier == 1 ? 2 : 1
         let id = EventHotKeyID(signature: 0x4F4E4957, id: identifier) // ONIW
         let status = RegisterEventHotKey(choice.keyCode, choice.modifiers, id,
                                          GetApplicationEventTarget(), 0, &candidate)
@@ -99,6 +100,7 @@ final class GlobalShortcut {
         }
         let previous = hotKey
         hotKey = candidate
+        activeIdentifier = identifier
         preset = choice
         registrationError = nil
         UserDefaults.standard.set(choice.rawValue, forKey: Self.preferenceKey)
