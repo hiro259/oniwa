@@ -1,0 +1,16 @@
+name: macOS build
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift unit tests
+        run: swift test
+      - name: Build macOS app
+        run: sh build.sh
