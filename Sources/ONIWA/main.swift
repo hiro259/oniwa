@@ -77,7 +77,7 @@ struct SearchView: View {
             HStack {
                 Text("ONIWA").font(.headline)
                 Spacer()
-                Text("⌃⌥ Space").foregroundStyle(.secondary).font(.caption)
+                Text("⌃⌘ O").foregroundStyle(.secondary).font(.caption)
             }
             TextField("Search Spaces, apps, or aliases…", text: $state.query)
                 .textFieldStyle(.roundedBorder)
@@ -195,6 +195,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.title = "庭"
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Search Spaces…", action: #selector(openPanel), keyEquivalent: ""))
+        if shortcut.registrationError != nil {
+            let warning = NSMenuItem(title: "Shortcut unavailable — open from menu", action: nil, keyEquivalent: "")
+            warning.isEnabled = false
+            menu.addItem(warning)
+        }
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit ONIWA", action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items { item.target = self }
