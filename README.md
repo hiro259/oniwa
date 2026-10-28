@@ -7,7 +7,7 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 
 ## First prototype
 
-- `⌃ Control + ⌥ Option + Space` opens a search palette; menu-bar “庭” is a fallback.
+- `⌃ Control + ⌘ Command + O` opens a search palette; menu-bar “庭” is a fallback. (The previous Ctrl+Option+Space conflicts with macOS Input Sources.)
 - Finds native desktops and fullscreen Spaces grouped by display.
 - Set a display name and search aliases (e.g. `shumi chrome`) by clicking the pencil.
 - Partial, prefix and subsequence search; arrows to select, Enter to switch, Esc to dismiss.
@@ -29,7 +29,7 @@ open build/ONIWA.app
 
 The `build.sh` script is POSIX sh, callable from **fish** with `sh build.sh`. The built app is ad-hoc signed **for local testing only**. No notarized public release exists yet.
 
-macOS may request **Automation** permission for controlling System Events on the first Space switch. Enable the default `Control+Left / Control+Right` shortcuts under System Settings → Keyboard → Keyboard Shortcuts → Mission Control. A shortcut conflict may require changing this prototype's hard-coded hotkey.
+macOS may request **Automation** permission for controlling System Events on the first Space switch. Enable the default `Control+Left / Control+Right` shortcuts under System Settings → Keyboard → Keyboard Shortcuts → Mission Control. A shortcut conflict may prevent the hotkey from firing. If the menu bar shows a shortcut error, use the menu bar while troubleshooting. Customizable shortcuts are planned for a later version.
 
 ## Known limitations / safety
 
@@ -39,6 +39,7 @@ macOS may request **Automation** permission for controlling System Events on the
 - Mission Control's displayed names are **not** renamed. Custom names exist only in ONIWA.
 - Fullscreen Spaces are recreated by macOS and their custom names may not persist after closing/reopening the fullscreen window.
 - Spaces can reorder or disappear; ONIWA rechecks IDs before switching, but complex transitions still need real-world testing.
+- The default global shortcut is Ctrl+Command+O to avoid macOS's Ctrl+Option+Space input-source shortcut.
 - The draft prioritizes the search flow. Visual free-placement maps and managing windows are out of scope for v0.1.
 
 ## Acknowledgements
