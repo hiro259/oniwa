@@ -12,6 +12,7 @@ final class SearchState: ObservableObject {
     @Published var aliasesDraft = ""
     @Published var errorMessage: String?
     @Published var isSwitching = false
+    @Published var shortcutDescription = "⌃⌥⇧ O"
     let labels = LabelStore()
     let switcher = SpaceSwitcher()
     var hidePanel: (() -> Void)?
@@ -77,7 +78,7 @@ struct SearchView: View {
             HStack {
                 Text("ONIWA").font(.headline)
                 Spacer()
-                Text("⌃⌘ O").foregroundStyle(.secondary).font(.caption)
+                Text(state.shortcutDescription).foregroundStyle(.secondary).font(.caption)
             }
             TextField("Search Spaces, apps, or aliases…", text: $state.query)
                 .textFieldStyle(.roundedBorder)
@@ -185,21 +186,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shortcut: GlobalShortcut?
     private var panel: SearchPanel?
     private var statusItem: NSStatusItem?
+    private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         let shortcut = GlobalShortcut()
         shortcut.onPress = { [weak self] in self?.togglePanel() }
         self.shortcut = shortcut
+        state.shortcutDescription = shortcut.preset.title
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "庭"
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Search Spaces…", action: #selector(openPanel), keyEquivalent: ""))
-        if shortcut.registrationError != nil {
-            let warning = NSMenuItem(title: "Shortcut unavailable — open from menu", action: nil, keyEquivalent: "")
-            warning.isEnabled = false
-            menu.addItem(warning)
+        let shortcutRoot = NSMenuItem(title: "ショートカット", action: nil, keyEquivalent: "")
+        let shortcutMenu = NSMenu(title: "ショートカット")
+        for preset in GlobalShortcut.Preset.allCases {
+            let option = NSMenuItem(title: preset.title,
+                                    action: #selector(changeShortcut(_:)),
+                                    keyEquivalent: "")
+            option.target = self
+            option.representedObject = preset.rawValue
+            option.state = preset == shortcut.preset ? .on : .off
+            shortcutItems[preset] = option
+            shortcutMenu.addItem(option)
         }
+        shortcutRoot.submenu = shortcutMenu
+        menu.addItem(shortcutRoot)
+        let diagnosis = NSMenuItem(title: "ショートカット診断…",
+                                   action: #selector(showShortcutDiagnosis),
+                                   keyEquivalent: "")
+        diagnosis.target = self
+        menu.addItem(diagnosis)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit ONIWA", action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items { item.target = self }
@@ -207,6 +224,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
         state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
         state.showPanel = { [weak self] in self?.openPanel() }
+    }
+
+    @objc private func changeShortcut(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let preset = GlobalShortcut.Preset(rawValue: raw),
+              let shortcut else { return }
+        if shortcut.register(preset) {
+            state.shortcutDescription = preset.title
+            for (choice, item) in shortcutItems {
+                item.state = choice == preset ? .on : .off
+            }
+        } else {
+            showShortcutDiagnosis()
+        }
+    }
+
+    @objc private func showShortcutDiagnosis() {
+        let alert = NSAlert()
+        alert.messageText = "ONIWA ショートカット診断"
+        alert.informativeText = shortcut?.diagnosticSummary() ?? "ショートカット管理が開始されていません。"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
