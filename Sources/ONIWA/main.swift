@@ -103,8 +103,9 @@ struct SearchView: View {
                 Text(error).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 3) {
+            ScrollViewReader { scroll in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 3) {
                     ForEach(state.results) { space in
                         HStack(spacing: 9) {
                             Image(systemName: space.kind == 4 ? "arrow.up.left.and.arrow.down.right" : "display")
@@ -143,6 +144,14 @@ struct SearchView: View {
                             if state.selectedID == space.id { state.activate(space) }
                             else { state.selectedID = space.id }
                         }
+                        .id(space.id)
+                    }
+                }
+                }
+                .onChange(of: state.selectedID) { id in
+                    guard let id else { return }
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        scroll.scrollTo(id, anchor: .center)
                     }
                 }
             }
