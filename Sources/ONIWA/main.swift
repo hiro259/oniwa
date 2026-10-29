@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Carbon.HIToolbox
 import ONIWACore
 
 @MainActor
@@ -34,6 +35,21 @@ final class SearchState: ObservableObject {
         if !results.contains(where: { $0.id == selectedID }) {
             selectedID = results.first?.id
         }
+    }
+
+    /// Keyboard navigation stays active even when the search TextField has focus.
+    func moveSelection(by offset: Int) {
+        let options = results
+        guard !options.isEmpty else { return }
+        let index = options.firstIndex(where: { $0.id == selectedID }) ?? (offset > 0 ? -1 : 0)
+        let next = min(max(index + offset, 0), options.count - 1)
+        selectedID = options[next].id
+    }
+
+    func activateSelected() {
+        guard let selected = results.first(where: { $0.id == selectedID })
+                ?? results.first else { return }
+        activate(selected)
     }
 
     func beginEdit(_ space: SpaceEntry) {
@@ -82,7 +98,7 @@ struct SearchView: View {
             TextField("Search Spaces, apps, or aliases…", text: $state.query)
                 .textFieldStyle(.roundedBorder)
                 .focused($isSearchFocused)
-                .onSubmit { selectCurrent() }
+                .onSubmit { state.activateSelected() }
             if let error = state.errorMessage {
                 Text(error).font(.caption).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
@@ -143,11 +159,8 @@ struct SearchView: View {
         .onAppear { isSearchFocused = true }
         .onChange(of: state.query) { _ in state.selectedID = state.results.first?.id }
         .onMoveCommand { direction in
-            let options = state.results
-            guard !options.isEmpty else { return }
-            let i = options.firstIndex(where: { $0.id == state.selectedID }) ?? 0
-            if direction == .down { state.selectedID = options[min(i+1, options.count-1)].id }
-            if direction == .up { state.selectedID = options[max(i-1, 0)].id }
+            if direction == .down { state.moveSelection(by: 1) }
+            if direction == .up { state.moveSelection(by: -1) }
         }
         .onExitCommand { state.hidePanel?() }
         .sheet(isPresented: $state.editing) {
@@ -167,12 +180,7 @@ struct SearchView: View {
         }
     }
 
-    private func selectCurrent() {
-        guard let selected = state.results.first(where: { $0.id == state.selectedID })
-                ?? state.results.first else { return }
-        state.activate(selected)
-    }
-}
+ }
 
 final class SearchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -185,10 +193,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shortcut: GlobalShortcut?
     private var panel: SearchPanel?
     private var statusItem: NSStatusItem?
+    private var keyboardMonitor: Any?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        installKeyboardNavigation()
         let shortcut = GlobalShortcut()
         shortcut.onPress = { [weak self] in self?.togglePanel() }
         self.shortcut = shortcut
@@ -308,6 +318,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    /// The NSWindow field editor receives arrow keys first, so SwiftUI's
+    /// onMoveCommand on the containing view is not a dependable way to move
+    /// search selection. Only intercept while ONIWA's own panel is key.
+    /// Regular text input, editing sheets and other apps are untouched.
+    private func installKeyboardNavigation() {
+        keyboardMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self else { return event }
+            return self.handleKeyboardEvent(event)
+        }
+    }
+
+    private func handleKeyboardEvent(_ event: NSEvent) -> NSEvent? {
+        guard panel?.isKeyWindow == true,
+              !state.editing, !state.isSwitching else { return event }
+
+        // Let macOS's input method handle candidate navigation and Return when
+        // a Japanese/Chinese/Korean composition is still active.
+        if let editor = NSApp.keyWindow?.firstResponder as? NSTextView,
+           editor.hasMarkedText() {
+            return event
+        }
+
+        // Modified arrows must retain normal text editing behavior.
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if !modifiers.intersection([.command, .control, .option, .shift]).isEmpty {
+            return event
+        }
+
+        switch Int(event.keyCode) {
+        case kVK_DownArrow:
+            state.moveSelection(by: 1)
+            return nil
+        case kVK_UpArrow:
+            state.moveSelection(by: -1)
+            return nil
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            state.activateSelected()
+            return nil
+        case kVK_Escape:
+            panel?.orderOut(nil)
+            return nil
+        default:
+            return event
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        if let keyboardMonitor {
+            NSEvent.removeMonitor(keyboardMonitor)
+            self.keyboardMonitor = nil
+        }
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
