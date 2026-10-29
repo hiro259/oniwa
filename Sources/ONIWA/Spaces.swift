@@ -220,6 +220,49 @@ final class SpaceSwitcher {
                     return .failure(SwitchFailure(
                         "macOSがキー操作の送信を許可していません。アクセシビリティでONIWA（現在のビルド）を許可し、アプリを再起動してください。変更後も直らない場合は、署名とアプリの保存先を確認してください。"))
                 }
+                // ONIWA-only fast path: a near-zero Dock swipe using the
+                // native Mission Control pipeline. We never trust event posting
+                // as proof of a switch. If no movement is observed, verify the
+                // live ID again before trying the existing Ctrl+arrow fallback.
+                // Unexpected movement is a hard stop, never another keypress.
+                if InstantSwitchSettings.enabled,
+                   InstantSpaceGesture.post(right: direction == .right) {
+                    switch waitForNeighbor(
+                        previous: current, expected: nextSpaceID,
+                        displayID: target.displayID, reader: reader,
+                        timeout: 0.9
+                    ) {
+                    case .confirmed:
+                        // The next loop verifies the next neighboring Space.
+                        continue
+                    case .wrongSpace:
+                        return .failure(SwitchFailure(
+                            "瞬時切り替えで別のSpaceに移動しました。安全のため自動切り替えを停止しました。"))
+                    case .disconnected:
+                        return .failure(SwitchFailure(
+                            "瞬時切り替え中にモニターを認識できなくなりました。"))
+                    case .timedOut:
+                        // A delayed/unsupported synthetic gesture might still
+                        // be in flight. Give the system an extra observation,
+                        // and never emit Ctrl+arrow after movement was seen.
+                        guard let latest = reader.displays(includeAppNames: false)
+                            .first(where: { $0.id == target.displayID }) else {
+                            return .failure(SwitchFailure(
+                                "対象モニターが接続解除されました。"))
+                        }
+                        guard latest.spaces.map(\.systemID) == originalOrder else {
+                            return .failure(SwitchFailure(
+                                "瞬時切り替え中にSpaceの順序が変わりました。"))
+                        }
+                        if latest.currentID == nextSpaceID { continue }
+                        guard latest.currentID == current else {
+                            return .failure(SwitchFailure(
+                                "Spaceの移動状態を確認できないため、追加操作を中断しました。"))
+                        }
+                        // Still on the previous Space: normal fallback below.
+                    }
+                }
+
                 // On macOS 26/27, Mission Control can ignore a synthetic
                 // Ctrl+Arrow sent with only .maskControl. Reproduce the
                 // hardware keyboard event sequence instead:
@@ -260,7 +303,8 @@ final class SpaceSwitcher {
 
                 switch waitForNeighbor(
                     previous: current, expected: nextSpaceID,
-                    displayID: target.displayID, reader: reader
+                    displayID: target.displayID, reader: reader,
+                    timeout: transitionTimeout
                 ) {
                 case .confirmed: break
                 case .wrongSpace:
@@ -288,8 +332,9 @@ final class SpaceSwitcher {
     }
 
     private func waitForNeighbor(previous: UInt64, expected: UInt64,
-                                 displayID: String, reader: SpaceReader) -> StepOutcome {
-        let deadline = Date().addingTimeInterval(transitionTimeout)
+                                 displayID: String, reader: SpaceReader,
+                                 timeout: TimeInterval) -> StepOutcome {
+        let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             Thread.sleep(forTimeInterval: pollInterval)
             guard let display = reader.displays(includeAppNames: false)
