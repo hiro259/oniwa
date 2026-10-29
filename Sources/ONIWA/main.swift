@@ -12,17 +12,22 @@ final class SearchState: ObservableObject {
     @Published var editing = false
     @Published var nameDraft = ""
     @Published var aliasesDraft = ""
+    @Published var hasEditingLabel = false
+    @Published var editingIsSessionOnly = false
+    @Published var labelRevision = 0
     @Published var errorMessage: String?
     @Published var isSwitching = false
     @Published var shortcutDescription = "⌥ Space"
-    let labels = LabelStore()
+    let labels = SpaceLabelStore()
+    private var editingIdentity: SpaceIdentity?
     let switcher = SpaceSwitcher()
     var hidePanel: (() -> Void)?
 
     var all: [SpaceEntry] { groups.flatMap(\.spaces) }
     var results: [SpaceEntry] {
-        FuzzySearch.sorted(all, query: query) { space in
-            let label = labels.label(for: space)
+        _ = labelRevision
+        return FuzzySearch.sorted(all, query: query) { space in
+            let label = labels.label(for: space.identity)
             return [label?.name ?? "", label?.aliases ?? "",
                     space.defaultName, space.displayName] + space.appNames
         }
@@ -30,6 +35,7 @@ final class SearchState: ObservableObject {
 
     func refresh() {
         groups = SpaceReader.shared.displays()
+        if !groups.isEmpty { labels.reconcile(groups.flatMap(\.spaces).map(\.identity)) }
         errorMessage = SpaceReader.shared.available
             ? (groups.isEmpty ? "No Spaces found. This macOS version may be unsupported." : nil)
             : "Could not load SkyLight. This macOS version may be unsupported."
@@ -55,16 +61,48 @@ final class SearchState: ObservableObject {
 
     func beginEdit(_ space: SpaceEntry) {
         selectedID = space.id
-        let label = labels.label(for: space)
+        editingIdentity = space.identity
+        let label = labels.label(for: space.identity)
         nameDraft = label?.name ?? ""
         aliasesDraft = label?.aliases ?? ""
+        hasEditingLabel = label != nil
+        editingIsSessionOnly = space.identity.persistentKey == nil
         editing = true
     }
 
-    func saveLabel() {
-        guard let space = all.first(where: { $0.id == selectedID }) else { return }
-        labels.set(space, name: nameDraft, aliases: aliasesDraft)
+    func cancelEdit() {
         editing = false
+        editingIdentity = nil
+    }
+
+    /// Verify the selected live Space still exists before saving a name. This
+    /// prevents editing a disappeared fullscreen Space from assigning a name
+    /// to whatever later occupies its former position.
+    private func liveEditingIdentity() -> SpaceIdentity? {
+        guard let editingIdentity else { return nil }
+        let live = SpaceReader.shared.displays(includeAppNames: false)
+            .flatMap(\.spaces).map(\.identity)
+        return live.first(where: { $0 == editingIdentity })
+    }
+
+    func saveLabel() {
+        guard let identity = liveEditingIdentity() else {
+            cancelEdit()
+            errorMessage = "編集中のSpaceが見つかりません。検索一覧を更新してください。"
+            return
+        }
+        labels.update(identity, name: nameDraft, aliases: aliasesDraft)
+        labelRevision += 1
+        cancelEdit()
+        if !results.contains(where: { $0.id == selectedID }) {
+            selectedID = results.first?.id
+        }
+    }
+
+    func deleteLabel() {
+        nameDraft = ""
+        aliasesDraft = ""
+        saveLabel()
     }
 
     func activate(_ space: SpaceEntry) {
@@ -113,16 +151,17 @@ struct SearchView: View {
                                 .foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
-                                    Text(state.labels.label(for: space)?.name.isEmpty == false
-                                         ? (state.labels.label(for: space)?.name ?? space.defaultName)
+                                    Text(state.labels.label(for: space.identity)?.name.isEmpty == false
+                                         ? (state.labels.label(for: space.identity)?.name ?? space.defaultName)
                                          : space.defaultName)
                                         .fontWeight(space.id == state.selectedID ? .semibold : .regular)
                                     if space.isCurrent {
                                         Text("current").font(.caption2).foregroundStyle(.secondary)
                                     }
                                 }
-                                let alias = state.labels.label(for: space)?.aliases ?? ""
-                                Text([space.displayName, space.appNames.joined(separator: ", "), alias]
+                                let alias = state.labels.label(for: space.identity)?.aliases ?? ""
+                                Text([space.displayName, "Space \(space.index + 1)",
+                                      space.appNames.joined(separator: ", "), alias]
                                         .filter { !$0.isEmpty }.joined(separator: " · "))
                                     .font(.caption).foregroundStyle(.secondary)
                                     .lineLimit(1)
@@ -168,6 +207,11 @@ struct SearchView: View {
         .frame(width: 500, height: 420)
         .onAppear { isSearchFocused = true }
         .onChange(of: state.query) { _ in state.selectedID = state.results.first?.id }
+        .onChange(of: state.labelRevision) { _ in
+            if !state.results.contains(where: { $0.id == state.selectedID }) {
+                state.selectedID = state.results.first?.id
+            }
+        }
         .onMoveCommand { direction in
             if direction == .down { state.moveSelection(by: 1) }
             if direction == .up { state.moveSelection(by: -1) }
@@ -175,13 +219,23 @@ struct SearchView: View {
         .onExitCommand { state.hidePanel?() }
         .sheet(isPresented: $state.editing) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Name this Space").font(.headline)
-                TextField("Display name", text: $state.nameDraft)
-                TextField("Aliases (space-separated)", text: $state.aliasesDraft)
+                Text("Spaceの名前と検索用の別名").font(.headline)
+                TextField("表示名（例：趣味）", text: $state.nameDraft)
+                TextField("検索用の別名（例：shumi chrome）", text: $state.aliasesDraft)
+                if state.editingIsSessionOnly {
+                    Text("このSpaceには識別用UUIDがありません。誤ったSpaceへの名前引き継ぎを防ぐため、名前はONIWAを終了するまで有効です。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 HStack {
+                    if state.hasEditingLabel {
+                        Button("名前と別名を削除") { state.deleteLabel() }
+                            .foregroundStyle(.red)
+                    }
                     Spacer()
-                    Button("Cancel") { state.editing = false }
-                    Button("Save") { state.saveLabel() }
+                    Button("キャンセル") { state.cancelEdit() }
+                    Button("保存") { state.saveLabel() }
                         .keyboardShortcut(.defaultAction)
                 }
             }
