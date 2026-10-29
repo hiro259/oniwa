@@ -250,16 +250,20 @@ final class SpaceSwitcher {
                             return .failure(SwitchFailure(
                                 "対象モニターが接続解除されました。"))
                         }
-                        guard latest.spaces.map(\.systemID) == originalOrder else {
+                        switch InstantSwitchPolicy.fallbackDecision(
+                            previous: current, expected: nextSpaceID,
+                            observed: latest.currentID,
+                            orderUnchanged: latest.spaces.map(\.systemID) == originalOrder
+                        ) {
+                        case .alreadySwitched:
+                            continue
+                        case .keyboard:
+                            break // The previous Space is still current.
+                        case .abort:
                             return .failure(SwitchFailure(
-                                "瞬時切り替え中にSpaceの順序が変わりました。"))
+                                "Spaceの移動状態または順序が変わったため、追加操作を中断しました。"))
                         }
-                        if latest.currentID == nextSpaceID { continue }
-                        guard latest.currentID == current else {
-                            return .failure(SwitchFailure(
-                                "Spaceの移動状態を確認できないため、追加操作を中断しました。"))
-                        }
-                        // Still on the previous Space: normal fallback below.
+                        // No movement after the fast gesture: normal fallback.
                     }
                 }
 
