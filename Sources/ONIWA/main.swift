@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import Carbon.HIToolbox
+import CoreGraphics
 import ONIWACore
 
 @MainActor
@@ -323,7 +324,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showShortcutDiagnosis() {
         let alert = NSAlert()
         alert.messageText = "ONIWA ショートカット診断"
-        alert.informativeText = shortcut?.diagnosticSummary() ?? "ショートカット管理が開始されていません。"
+        let keyboardStatus = CGPreflightPostEventAccess()
+            ? "許可済み（Core Graphics）" : "未許可（アクセシビリティの設定を確認）"
+        let hotkeyStatus = shortcut?.diagnosticSummary()
+            ?? "ショートカット管理が開始されていません。"
+        alert.informativeText = hotkeyStatus + "\n\nキー操作の送信権限: " + keyboardStatus
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
