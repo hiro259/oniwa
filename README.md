@@ -100,11 +100,54 @@ ONIWA now checks macOS key-event posting permission with `CGPreflightPostEventAc
 - The recommended hotkey is Option+Space; it may type a nonbreaking space or conflict with macOS/third-party shortcuts on some computers. Use the recorder to select another combination when needed. A successful Carbon registration does not guarantee events are delivered.
 - The draft prioritizes the search flow. Visual free-placement maps and managing windows are out of scope for v0.1.
 
+## ONIWA-only instant Space switching (experimental)
+
+By default ONIWA attempts a near-instant Space transition **only when you
+select a Space inside ONIWA**. Menu bar **庭 → 瞬時切り替え（試験的）**
+turns this feature on or off. The setting is saved across launches.
+
+- Uses the Dock's near-zero-travel synthetic swipe gesture (macOS 26.6+
+  and macOS 27 only), keeping focus and normal Mission Control behavior.
+- ONIWA checks the destination Space ID after **every single step**.
+  If the fast attempt does not move, it checks the current ID again and tries
+  the previously tested **Ctrl+←/→ keyboard path**. If a different Space
+  appeared, it stops rather than risking a second movement.
+- On macOS 26.0–26.5, macOS 15 and untested newer major releases such as
+  macOS 28, the fast path is disabled and the normal switch is used.
+  The 26.0–26.5 systems have a known blank-window issue with this swipe
+  trick; see upstream [noswoosh](https://github.com/mmathys/noswoosh).
+- **No** global event tap, LaunchAgent, separate daemon, accessibility setting
+  changes, Dock preference changes, suppression of trackpad gestures, changes
+  to the physical Ctrl+arrow shortcuts, or SIP changes.
+- The private macOS event payload is fragile and may change on OS updates.
+  ONIWA falls back when the destination transition isn't observed, but **the
+  fast path is experimental until verified on the user's Mac**.
+- Gestures are adapted from MIT-licensed
+  [noswoosh](https://github.com/mmathys/noswoosh).
+  See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+### Manual test checklist
+
+1. In menu bar **庭**, keep **瞬時切り替え（試験的）** checked.
+2. Open ONIWA, jump one Space left and one right; verify a fast transition and
+   that each target is correct.
+3. Jump across several Spaces and test fullscreen Chrome/Trello, including
+   switching *from* a fullscreen Space.
+4. Disable the feature in the menu; verify the previous animated Ctrl+arrow
+   method still works.
+5. Try an unsupported system (if available); switching should remain normal.
+6. Test a Sidecar/external display and sleep/wake before treating the instant
+   path as stable. If a switch seems wrong, turn instant mode off to keep the
+   known-good path.
+
 ## macOS 26/27 simulated Space shortcuts
 
 On macOS 27, a Core Graphics event with only `.maskControl` can be ignored by Mission Control even when Accessibility permission is granted and the physical keyboard works. ONIWA reproduces the verified four-event sequence (Control down, Arrow down/up with Control+SecondaryFn+NumericPad, Control up) using `.hidSystemState` and `.cghidEventTap`. Reference: [OpenLogi #1653](https://github.com/AprilNEA/OpenLogi/issues/1653) and [spacekit research](https://github.com/cehbz/spacekit/blob/main/macos-spaces-research.md). This **still requires a real-Mac test** on ONIWA before merging, especially with Sidecar.
 
 ## Acknowledgements
+
+Synthetic Dock-swipes adapted from MIT-licensed [noswoosh](https://github.com/mmathys/noswoosh);
+copyright and full license in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Space-switching techniques researched with reference to MIT-licensed
 [spaceSwitcher](https://github.com/ccarpiog/spaceSwitcher) and
