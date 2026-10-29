@@ -258,6 +258,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: SearchPanel?
     private var statusItem: NSStatusItem?
     private var keyboardMonitor: Any?
+    private var instantSwitchItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -291,6 +292,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutMenu.addItem(recorderItem)
         shortcutRoot.submenu = shortcutMenu
         menu.addItem(shortcutRoot)
+        let instant = NSMenuItem(title: "瞬時切り替え（試験的）",
+                                 action: #selector(toggleInstantSwitch),
+                                 keyEquivalent: "")
+        instant.toolTip = "ONIWAでのみ瞬時切り替えを使用します。失敗時は通常切り替えに戻ります。"
+        instant.state = InstantSwitchSettings.enabled ? .on : .off
+        instant.target = self
+        instantSwitchItem = instant
+        menu.addItem(instant)
         let diagnosis = NSMenuItem(title: "ショートカット診断…",
                                    action: #selector(showShortcutDiagnosis),
                                    keyEquivalent: "")
@@ -303,6 +312,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
         state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
         state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
+    }
+
+    @objc private func toggleInstantSwitch() {
+        InstantSwitchSettings.enabled.toggle()
+        instantSwitchItem?.state = InstantSwitchSettings.enabled ? .on : .off
     }
 
     @objc private func changeShortcut(_ sender: NSMenuItem) {
