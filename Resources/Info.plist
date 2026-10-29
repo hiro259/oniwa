@@ -10,5 +10,4 @@
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
-    <key>NSAppleEventsUsageDescription</key><string>ONIWA needs to send the standard Space switching shortcuts through System Events.</string>
 </dict></plist>
