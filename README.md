@@ -14,12 +14,34 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 - Labels are local UserDefaults data. No analytics or network requests.
 - Space discovery uses private **read-only** SkyLight symbols. Switching posts the standard `Ctrl+← / →` shortcut through Core Graphics with a **HID-system-state event source**, explicit Control-key down/up, and the arrow-key Fn/NumericPad flags required on some macOS versions (not AppleScript/System Events). It now confirms **each neighboring Space** before continuing; it stops on unexpected movement, disappearing Spaces, or reordering.
 
+## Space naming and persistence (Issue #3)
+
+- Click the pencil on any Space to set a **display name** and **search aliases**; click **名前と別名を削除** to clear both.
+- Multiple fullscreen windows of the same app (for example Chrome) are separate Spaces. Results show the monitor and Space number so they are distinguishable even before naming.
+- Names update in the search results immediately after saving and survive an ONIWA restart **if that same Space still exposes a UUID**.
+- Names are stored by **monitor identifier + Space UUID**, never by Mission Control position. Renaming or reordering a Space does not reassign a name to a different Space.
+- If macOS supplies no UUID, ONIWA clearly marks the name as **session-only** and does not write it to disk. This is safer than restoring it onto an unrelated Space after a reorder/relaunch.
+- When closing and reopening a fullscreen window, macOS may create a new Space UUID; ONIWA intentionally does **not** guess that this new Space is the old one. Rename it if needed.
+- Existing v1 UUID labels are migrated only when their UUID is unique across currently connected monitors. Older position-based labels are **not** imported because their identity cannot be proven. Migrated labels are consumed so deleting a name does not restore its old value.
+- The name appears **only inside ONIWA**, not in the standard macOS Mission Control UI.
+
+### Name-management verification (real Mac)
+
+1. Give two fullscreen Chrome Spaces separate names, such as **趣味** and **仕事**. Verify each result, each pencil edit, and each switch points to the right Space.
+2. Close/reopen ONIWA without rebuilding; names for existing UUID-backed Spaces should remain.
+3. Rearrange Spaces in Mission Control and refresh ONIWA; names should follow the original Space, not its former number.
+4. Close and recreate a fullscreen Space; if the UUID changed, its old label must **not** attach to a different Space.
+5. Rename a Space and search for the new name immediately; then delete the name and aliases.
+6. Repeat with Sidecar connected and disconnected; names on one monitor must not migrate to the other.
+
+Unit tests in `SpaceLabelsTests.swift` cover persistence, safe deletion, multi-monitor isolation, legacy migration, ambiguous UUIDs, and the no-UUID session-only fallback. Real-Mac tests are still needed for actual SkyLight UUID behavior.
+
 ## Build (macOS)
 
 Requires macOS 13+, Apple developer command line tools or Xcode.
 
 ```fish
-cd ~/Developer/oniwa
+cd ~/myfile/oniwa
 git fetch origin
 git switch feat/spaces-search-foundation
 swift test

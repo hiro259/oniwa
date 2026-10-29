@@ -4,7 +4,8 @@ import Foundation
 import ONIWACore
 
 struct SpaceEntry: Identifiable, Hashable {
-    let id: String
+    let identity: SpaceIdentity
+    var id: String { identity.runtimeKey }
     let systemID: UInt64
     let displayID: String
     let displayName: String
@@ -24,40 +25,6 @@ struct DisplayGroup {
     let name: String
     let currentID: UInt64?
     let spaces: [SpaceEntry]
-}
-
-struct CustomLabel: Codable {
-    var name: String
-    var aliases: String
-}
-
-/// Labels are stored by Space UUID (with a positional fallback when UUID is empty).
-/// Fullscreen Space UUIDs are not guaranteed to survive closing/reopening an app.
-final class LabelStore {
-    private let key = "oniwa.customLabels.v1"
-    private var records: [String: CustomLabel] = [:]
-
-    init() {
-        if let data = UserDefaults.standard.data(forKey: key),
-           let saved = try? JSONDecoder().decode([String: CustomLabel].self, from: data) {
-            records = saved
-        }
-    }
-
-    func label(for item: SpaceEntry) -> CustomLabel? { records[item.id] }
-
-    func set(_ item: SpaceEntry, name: String, aliases: String) {
-        let cleanName = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
-        let cleanAliases = String(aliases.trimmingCharacters(in: .whitespacesAndNewlines).prefix(250))
-        if cleanName.isEmpty && cleanAliases.isEmpty {
-            records.removeValue(forKey: item.id)
-        } else {
-            records[item.id] = CustomLabel(name: cleanName, aliases: cleanAliases)
-        }
-        if let data = try? JSONEncoder().encode(records) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
-    }
 }
 
 /// Read-only private SkyLight API. Failure returns no Spaces, never false success.
@@ -105,10 +72,10 @@ final class SpaceReader {
                         ?? (record["id64"] as? NSNumber) else { return nil }
                 let id = number.uint64Value
                 let uuid = record["uuid"] as? String ?? ""
-                // Do not persist the volatile numeric Space ID.
-                let key = uuid.isEmpty ? "position:\(displayID):\(index)" : "uuid:\(uuid)"
+                // The numeric Space ID is used only while this Space exists.
+                let identity = SpaceIdentity(displayID: displayID, managedID: id, uuid: uuid)
                 let kind = (record["type"] as? NSNumber)?.intValue ?? 0
-                return SpaceEntry(id: key, systemID: id, displayID: displayID,
+                return SpaceEntry(identity: identity, systemID: id, displayID: displayID,
                                   displayName: name, index: index, kind: kind,
                                   isCurrent: current?.uint64Value == id,
                                   appNames: ownerNames[id] ?? [])
