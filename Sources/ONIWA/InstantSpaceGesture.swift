@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import Darwin
+import ONIWACore
 
 /// ONIWA-only near-instant native Space transition. This is deliberately *not*
 /// an event tap and does not change the system Ctrl+arrow bindings or swipes.
@@ -40,8 +41,8 @@ enum InstantSpaceGesture {
 
     static var isSupported: Bool {
         let version = ProcessInfo.processInfo.operatingSystemVersion
-        return version.majorVersion == 27 ||
-               (version.majorVersion == 26 && version.minorVersion >= 6)
+        return InstantSwitchPolicy.supportsInstant(
+            major: version.majorVersion, minor: version.minorVersion)
     }
 
     /// Returns true only if the *complete event sequence* was constructed and
