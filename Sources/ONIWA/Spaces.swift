@@ -251,11 +251,28 @@ final class SpaceSwitcher {
                 guard let script else {
                     return .failure(SwitchFailure("切り替え操作を作成できませんでした。"))
                 }
-                _ = script.executeAndReturnError(&scriptError)
-                if let scriptError {
-                    NSLog("ONIWA: System Events switch error: %@", scriptError)
-                    return .failure(SwitchFailure(
-                        "macOSの操作が許可されませんでした。「プライバシーとセキュリティ」→「オートメーション」でSystem Eventsの許可を確認してください。"))
+                let result = script.executeAndReturnError(&scriptError)
+                if result == nil || scriptError != nil {
+                    // NSAppleScript errors distinguish Automation denial (-1743)
+                    // from Accessibility denial (-1719). They can also indicate
+                    // script execution errors unrelated to permissions.
+                    let code = (scriptError?[NSAppleScript.errorNumber] as? NSNumber)?.intValue
+                        ?? (scriptError?[NSAppleScript.errorNumber] as? Int)
+                    let detail = (scriptError?[NSAppleScript.errorMessage] as? String)
+                        ?? (scriptError?[NSAppleScript.errorBriefMessage] as? String)
+                        ?? "詳細なし"
+                    NSLog("ONIWA: System Events script failed (code=%@): %@",
+                          code.map(String.init) ?? "unknown", detail)
+                    let message: String
+                    switch code {
+                    case -1743:
+                        message = "System Eventsへの操作が拒否されました（-1743）。「システム設定 → プライバシーとセキュリティ → オートメーション → ONIWA → System Events」で許可してください。"
+                    case -1719:
+                        message = "アクセシビリティ操作が拒否されました（-1719）。「システム設定 → プライバシーとセキュリティ → アクセシビリティ」でONIWAを許可してください。"
+                    default:
+                        message = "Space切り替え中にAppleScriptエラーが発生しました（コード: \(code.map(String.init) ?? "不明")）。\(detail)"
+                    }
+                    return .failure(SwitchFailure(message))
                 }
 
                 switch waitForNeighbor(
