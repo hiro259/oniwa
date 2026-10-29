@@ -148,15 +148,24 @@ struct SearchView: View {
                     ForEach(state.results) { space in
                         HStack(spacing: 9) {
                             Image(systemName: space.kind == 4 ? "arrow.up.left.and.arrow.down.right" : "display")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(space.isCurrent ? Color.green : Color.secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
                                     Text(state.labels.label(for: space.identity)?.name.isEmpty == false
                                          ? (state.labels.label(for: space.identity)?.name ?? space.defaultName)
                                          : space.defaultName)
-                                        .fontWeight(space.id == state.selectedID ? .semibold : .regular)
+                                        .fontWeight(space.id == state.selectedID || space.isCurrent
+                                            ? .semibold : .regular)
+                                        .lineLimit(1)
                                     if space.isCurrent {
-                                        Text("current").font(.caption2).foregroundStyle(.secondary)
+                                        Label("表示中", systemImage: "checkmark.circle.fill")
+                                            .font(.caption2.weight(.bold))
+                                            .foregroundStyle(Color.green)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.green.opacity(0.14), in: Capsule())
+                                            .fixedSize()
+                                            .help("このモニターで現在表示されているSpace")
                                     }
                                 }
                                 let alias = state.labels.label(for: space.identity)?.aliases ?? ""
@@ -176,9 +185,19 @@ struct SearchView: View {
                             .help("Rename or add aliases")
                         }
                         .padding(8)
+                        // The accent background indicates keyboard selection.
+                        // A green border and explicit badge indicate the actual
+                        // visible Space, even when a different result is selected.
                         .background(space.id == state.selectedID
-                            ? Color.accentColor.opacity(0.16) : Color.clear)
+                            ? Color.accentColor.opacity(0.16)
+                            : (space.isCurrent ? Color.green.opacity(0.06) : Color.clear))
                         .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 7)
+                                .strokeBorder(space.isCurrent ? Color.green.opacity(0.72) : Color.clear,
+                                              lineWidth: 1.5)
+                                .allowsHitTesting(false)
+                        }
                         .contentShape(Rectangle())
                         .onTapGesture {
                             if state.selectedID == space.id { state.activate(space) }
@@ -196,7 +215,7 @@ struct SearchView: View {
                 }
             }
             HStack {
-                Text("↑↓ Select   ↵ Switch   Esc Close")
+                Text("↑↓ 選択   ↵ 切り替え   Esc 閉じる")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Refresh") { state.refresh() }
