@@ -154,9 +154,18 @@ struct SearchView: View {
                                     Text(state.labels.label(for: space.identity)?.name.isEmpty == false
                                          ? (state.labels.label(for: space.identity)?.name ?? space.defaultName)
                                          : space.defaultName)
-                                        .fontWeight(space.id == state.selectedID ? .semibold : .regular)
+                                        .fontWeight(space.id == state.selectedID || space.isCurrent
+                                            ? .semibold : .regular)
+                                        .lineLimit(1)
                                     if space.isCurrent {
-                                        Text("current").font(.caption2).foregroundStyle(.secondary)
+                                        Label("current", systemImage: "checkmark.circle.fill")
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(Color.secondary.opacity(0.09), in: Capsule())
+                                            .fixedSize()
+                                            .help("このモニターで現在表示されているSpace")
                                     }
                                 }
                                 let alias = state.labels.label(for: space.identity)?.aliases ?? ""
@@ -176,9 +185,19 @@ struct SearchView: View {
                             .help("Rename or add aliases")
                         }
                         .padding(8)
+                        // The accent background indicates keyboard selection.
+                        // A subtle neutral border and "current" badge indicate the
+                        // visible Space, even when another result is selected.
                         .background(space.id == state.selectedID
-                            ? Color.accentColor.opacity(0.16) : Color.clear)
+                            ? Color.accentColor.opacity(0.16)
+                            : (space.isCurrent ? Color.secondary.opacity(0.04) : Color.clear))
                         .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 7)
+                                .strokeBorder(space.isCurrent ? Color.secondary.opacity(0.38) : Color.clear,
+                                              lineWidth: 1)
+                                .allowsHitTesting(false)
+                        }
                         .contentShape(Rectangle())
                         .onTapGesture {
                             if state.selectedID == space.id { state.activate(space) }
@@ -196,7 +215,7 @@ struct SearchView: View {
                 }
             }
             HStack {
-                Text("↑↓ Select   ↵ Switch   Esc Close")
+                Text("↑↓ 選択   ↵ 切り替え   Esc 閉じる")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Refresh") { state.refresh() }
@@ -258,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: SearchPanel?
     private var statusItem: NSStatusItem?
     private var keyboardMonitor: Any?
+    private var instantSwitchItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -291,6 +311,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutMenu.addItem(recorderItem)
         shortcutRoot.submenu = shortcutMenu
         menu.addItem(shortcutRoot)
+        let instant = NSMenuItem(title: "瞬時切り替え（試験的）",
+                                 action: #selector(toggleInstantSwitch),
+                                 keyEquivalent: "")
+        instant.toolTip = "ONIWAでのみ瞬時切り替えを使用します。失敗時は通常切り替えに戻ります。"
+        instant.state = InstantSwitchSettings.enabled ? .on : .off
+        instant.target = self
+        instantSwitchItem = instant
+        menu.addItem(instant)
         let diagnosis = NSMenuItem(title: "ショートカット診断…",
                                    action: #selector(showShortcutDiagnosis),
                                    keyEquivalent: "")
@@ -303,6 +331,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = item
         state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
         state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
+    }
+
+    @objc private func toggleInstantSwitch() {
+        InstantSwitchSettings.enabled.toggle()
+        instantSwitchItem?.state = InstantSwitchSettings.enabled ? .on : .off
     }
 
     @objc private func changeShortcut(_ sender: NSMenuItem) {
