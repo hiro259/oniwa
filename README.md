@@ -27,7 +27,24 @@ sh build.sh
 open build/ONIWA.app
 ```
 
-The `build.sh` script is POSIX sh, callable from **fish** with `sh build.sh`. The built app is ad-hoc signed **for local testing only**. No notarized public release exists yet.
+The `build.sh` script is POSIX sh, callable from **fish** with `sh build.sh`. It uses ad-hoc signing if no identity is configured (including in CI), which **may invalidate Accessibility permissions after every rebuild**. No notarized public release exists yet.
+
+### Stable local code signing (recommended for frequent rebuilds)
+
+Because macOS ties accessibility permissions to the app's signing identity, repeatedly signing with `codesign --sign -` may make a newly compiled ONIWA untrusted even when the Settings toggle still appears enabled. Use a **consistent certificate and app path** for local builds:
+
+```fish
+security find-identity -v -p codesigning
+# Use the SHA-1 identifier of an existing Apple Development or Developer ID Application identity:
+set -gx ONIWA_CODESIGN_IDENTITY "YOUR_CERTIFICATE_SHA1"
+sh build.sh
+codesign -dv --verbose=2 build/ONIWA.app 2>&1
+open build/ONIWA.app
+```
+
+The identity value is the local certificate's public identifier, **not a password or private key**. If a suitable identity is absent, builds still work ad-hoc, but reauthorizing Accessibility may be necessary. Never commit certificates or private keys to this repository. Signing with a development identity is **not** a substitute for Developer ID distribution signing and notarization.
+
+
 
 macOS may request **Automation** permission for controlling System Events on the first Space switch. Enable the default `Control+Left / Control+Right` shortcuts under System Settings → Keyboard → Keyboard Shortcuts → Mission Control. The menu-bar **庭 → ショートカット** allows choosing the recommended `⌥Space`, the previous presets, or **ショートカットを記録…** to capture any combination with ⌘, ⌃ or ⌥ plus another key. Press the combination in the recording field and click **設定する**; cancel or registration failure restores the previous shortcut. **庭 → ショートカット診断…** shows whether Carbon registration succeeded and the number of events ONIWA actually received since launch. Registration success alone does not guarantee delivery: a system or other application shortcut can intercept the keys.
 
@@ -36,10 +53,10 @@ macOS may request **Automation** permission for controlling System Events on the
 If selecting a Space displays a red error, the search and SkyLight enumeration have worked; **the System Events AppleScript step failed**. The updated UI reports the actual AppleScript error code instead of always claiming an Automation denial.
 
 - **-1743:** System Settings → Privacy & Security → Automation → ONIWA → allow **System Events**.
-- **-1719:** System Settings → Privacy & Security → Accessibility → enable **ONIWA**.
+- **-1719 or 1002** (System Events reports 'not allowed to send keystrokes'): System Settings → Privacy & Security → Accessibility → enable **ONIWA**. If it appears enabled after rebuilding ad-hoc, quit ONIWA, toggle it off/on, and relaunch. If necessary, remove/re-add the exact `build/ONIWA.app` path.
 - **Other code:** record the numeric code and brief message; the cause may be unrelated to permissions.
 - The system may prompt for access only after the first attempted Space switch. Quit/relaunch ONIWA after changing a denied permission, then retry.
-- Development builds are ad-hoc signed; rebuilding can change the code identity macOS uses for authorization. Do not run blanket `tccutil reset` commands because they revoke permissions for unrelated apps.
+- Without `ONIWA_CODESIGN_IDENTITY`, development builds use ad-hoc signing; rebuilding can change the code identity macOS uses for authorization. For repeated updates, use a persistent local signing identity and the same app path. Do not run blanket `tccutil reset` commands because they revoke permissions for unrelated apps.
 ## Manual switching checks (before merging)
 
 1. In **System Settings → Keyboard → Keyboard Shortcuts → Mission Control**, enable **Move left/right a space** (`Ctrl+←` and `Ctrl+→`); ONIWA uses those built-in shortcuts.
