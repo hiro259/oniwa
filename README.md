@@ -3,7 +3,7 @@
 Free, open-source macOS Spaces switcher with custom names and fuzzy search.
 ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual desktop engine.
 
-**Status: early prototype ([PR #2](https://github.com/hiro259/oniwa/pull/2), related to Issue #1).** The search UI and custom shortcut recorder have been confirmed on a real Mac. Space switching still needs hands-on verification, especially across monitors.
+**Status: early prototype ([PR #2](https://github.com/hiro259/oniwa/pull/2), related to Issue #1).** The search UI, custom shortcut recorder and at least one Space switch have worked on a real Mac. The revised Core Graphics switch method and multi-monitor behavior still need hands-on verification.
 
 ## First prototype
 
@@ -12,7 +12,7 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 - Set a display name and search aliases (e.g. `shumi chrome`) by clicking the pencil.
 - Partial, prefix and subsequence search. **While typing in the search field**, ↑ / ↓ select results, Enter switches to the highlighted Space, and Esc closes ONIWA. The key event router leaves active IME composition alone.
 - Labels are local UserDefaults data. No analytics or network requests.
-- Space discovery uses private **read-only** SkyLight symbols. Switching uses Apple's standard `Ctrl+← / →` behavior through System Events. It now confirms **each neighboring Space** before continuing; it stops on unexpected movement, disappearing Spaces, or reordering.
+- Space discovery uses private **read-only** SkyLight symbols. Switching posts the standard `Ctrl+← / →` shortcut via Core Graphics (not AppleScript/System Events). It now confirms **each neighboring Space** before continuing; it stops on unexpected movement, disappearing Spaces, or reordering.
 
 ## Build (macOS)
 
@@ -42,20 +42,20 @@ codesign -dv --verbose=2 build/ONIWA.app 2>&1
 open build/ONIWA.app
 ```
 
-The identity value is the local certificate's public identifier, **not a password or private key**. If a suitable identity is absent, builds still work ad-hoc, but reauthorizing Accessibility may be necessary. Never commit certificates or private keys to this repository. Signing with a development identity is **not** a substitute for Developer ID distribution signing and notarization.
+The identity value must be an actual **40-character hexadecimal SHA-1** from the previous `security find-identity` output, not the literal `YOUR_CERTIFICATE_SHA1` placeholder. `build.sh` now rejects invalid or missing identities with a clear error. Setting the environment variable does not sign an already built app: rerun `sh build.sh`. The identity is a local certificate's public identifier, **not a password or private key**. If a suitable identity is absent, builds still work ad-hoc, but reauthorizing Accessibility may be necessary. Never commit certificates or private keys to this repository. Signing with a development identity is **not** a substitute for Developer ID distribution signing and notarization.
 
 
 
-macOS may request **Automation** permission for controlling System Events on the first Space switch. Enable the default `Control+Left / Control+Right` shortcuts under System Settings → Keyboard → Keyboard Shortcuts → Mission Control. The menu-bar **庭 → ショートカット** allows choosing the recommended `⌥Space`, the previous presets, or **ショートカットを記録…** to capture any combination with ⌘, ⌃ or ⌥ plus another key. Press the combination in the recording field and click **設定する**; cancel or registration failure restores the previous shortcut. **庭 → ショートカット診断…** shows whether Carbon registration succeeded and the number of events ONIWA actually received since launch. Registration success alone does not guarantee delivery: a system or other application shortcut can intercept the keys.
+macOS may request **Accessibility / key-event posting** permission on the first Space switch. ONIWA no longer uses Apple Events or System Events to send keys. Enable the default `Control+Left / Control+Right` shortcuts under System Settings → Keyboard → Keyboard Shortcuts → Mission Control. The menu-bar **庭 → ショートカット** allows choosing the recommended `⌥Space`, the previous presets, or **ショートカットを記録…** to capture any combination with ⌘, ⌃ or ⌥ plus another key. Press the combination in the recording field and click **設定する**; cancel or registration failure restores the previous shortcut. **庭 → ショートカット診断…** shows whether Carbon registration succeeded and the number of events ONIWA actually received since launch. Registration success alone does not guarantee delivery: a system or other application shortcut can intercept the keys.
 
 ## macOS permission troubleshooting
 
-If selecting a Space displays a red error, the search and SkyLight enumeration have worked; **the System Events AppleScript step failed**. The updated UI reports the actual AppleScript error code instead of always claiming an Automation denial.
+ONIWA now checks macOS key-event posting permission with `CGPreflightPostEventAccess()` and, when missing, asks the OS via `CGRequestPostEventAccess()`. The old AppleScript error `1002` is avoided by no longer asking **System Events** to send keystrokes. This does **not** bypass macOS permissions: Accessibility permission is still necessary.
 
-- **-1743:** System Settings → Privacy & Security → Automation → ONIWA → allow **System Events**.
-- **-1719 or 1002** (System Events reports 'not allowed to send keystrokes'): System Settings → Privacy & Security → Accessibility → enable **ONIWA**. If it appears enabled after rebuilding ad-hoc, quit ONIWA, toggle it off/on, and relaunch. If necessary, remove/re-add the exact `build/ONIWA.app` path.
-- **Other code:** record the numeric code and brief message; the cause may be unrelated to permissions.
-- The system may prompt for access only after the first attempted Space switch. Quit/relaunch ONIWA after changing a denied permission, then retry.
+- **Permission denied:** System Settings → Privacy & Security → Accessibility → allow the actual `build/ONIWA.app` you run. Restart ONIWA after granting it.
+- **Already enabled but still denied:** confirm the app path and signing identity. Quit the running ONIWA, remove the stale entry if necessary, and add the current build again.
+- **Shortcut posted but Space did not move:** verify System Settings → Keyboard → Keyboard Shortcuts → Mission Control has Ctrl+← and Ctrl+→ enabled; ONIWA reports a transition timeout rather than false success.
+- **Diagnostic:** `庭 → ショートカット診断…` also shows Core Graphics key-posting permission status.
 - Without `ONIWA_CODESIGN_IDENTITY`, development builds use ad-hoc signing; rebuilding can change the code identity macOS uses for authorization. For repeated updates, use a persistent local signing identity and the same app path. Do not run blanket `tccutil reset` commands because they revoke permissions for unrelated apps.
 ## Manual switching checks (before merging)
 
@@ -63,10 +63,10 @@ If selecting a Space displays a red error, the search and SkyLight enumeration h
 2. Launch ONIWA and give different names to two regular desktops and one fullscreen window, then search for each name. Check that Enter reaches the **named target**, not merely the next Space.
 3. Verify a target on another display (built-in → external / Sidecar) while a different Space stays open on the first display. A target display may receive the pointer: confirm this is acceptable.
 4. Try a target already visible, then add/remove/reorder a Space and refresh the search; ensure stale targets do not cause repeated wrong switches.
-5. If the first jump requests macOS **Automation** access to System Events, grant access and retry. If it fails, ONIWA should reopen with a visible error message instead of claiming success.
+5. If the first jump requests **Accessibility / key-event posting** access, grant permission and restart ONIWA. If it fails, ONIWA should show a visible error instead of claiming success.
 6. Disconnect a display or close a fullscreen Space and confirm ONIWA handles the vanished target without crashing.
 
-**Limitations:** These checks are not fully automated. macOS private SkyLight discovery and System Events delivery can change in new OS versions. The `Ctrl+arrow` shortcuts must be enabled and may be intercepted by other software. A display-wide switch affects other apps on that same display.
+**Limitations:** These checks are not fully automated. macOS private SkyLight discovery and Core Graphics event delivery can change in new OS versions. The `Ctrl+arrow` shortcuts must be enabled and may be intercepted by other software. A display-wide switch affects other apps on that same display.
 ## Known limitations / safety
 
 - GitHub Actions checks macOS compilation and unit tests. The user has confirmed that the search UI, custom shortcut and a selected Space switch work on a real Mac. **New keyboard-only result selection still requires hands-on confirmation.**
