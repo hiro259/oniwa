@@ -154,9 +154,18 @@ struct SearchView: View {
                                     Text(state.labels.label(for: space.identity)?.name.isEmpty == false
                                          ? (state.labels.label(for: space.identity)?.name ?? space.defaultName)
                                          : space.defaultName)
-                                        .fontWeight(space.id == state.selectedID ? .semibold : .regular)
+                                        .fontWeight(space.id == state.selectedID || space.isCurrent
+                                            ? .semibold : .regular)
+                                        .lineLimit(1)
                                     if space.isCurrent {
-                                        Text("current").font(.caption2).foregroundStyle(.secondary)
+                                        Label("current", systemImage: "checkmark.circle.fill")
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(Color.secondary.opacity(0.09), in: Capsule())
+                                            .fixedSize()
+                                            .help("このモニターで現在表示されているSpace")
                                     }
                                 }
                                 let alias = state.labels.label(for: space.identity)?.aliases ?? ""
@@ -176,9 +185,19 @@ struct SearchView: View {
                             .help("Rename or add aliases")
                         }
                         .padding(8)
+                        // The accent background indicates keyboard selection.
+                        // A subtle neutral border and "current" badge indicate the
+                        // visible Space, even when another result is selected.
                         .background(space.id == state.selectedID
-                            ? Color.accentColor.opacity(0.16) : Color.clear)
+                            ? Color.accentColor.opacity(0.16)
+                            : (space.isCurrent ? Color.secondary.opacity(0.04) : Color.clear))
                         .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 7)
+                                .strokeBorder(space.isCurrent ? Color.secondary.opacity(0.38) : Color.clear,
+                                              lineWidth: 1)
+                                .allowsHitTesting(false)
+                        }
                         .contentShape(Rectangle())
                         .onTapGesture {
                             if state.selectedID == space.id { state.activate(space) }
@@ -196,7 +215,7 @@ struct SearchView: View {
                 }
             }
             HStack {
-                Text("↑↓ Select   ↵ Switch   Esc Close")
+                Text("↑↓ 選択   ↵ 切り替え   Esc 閉じる")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button("Refresh") { state.refresh() }

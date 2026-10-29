@@ -9,6 +9,7 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 
 - **New installations:** `⌥ Option + Space` opens the search palette by default. Existing installations retain their previously selected shortcut until changed. The menu-bar **庭** remains the fallback if a combination is intercepted by macOS.
 - Finds native desktops and fullscreen Spaces grouped by display.
+- The **currently visible Space** on each display has a subtle neutral outline and **✓ current** badge; the accent-colored row background separately indicates the keyboard-selected result.
 - Set a display name and search aliases (e.g. `shumi chrome`) by clicking the pencil.
 - Partial, prefix and subsequence search. **While typing in the search field**, ↑ / ↓ select results, Enter switches to the highlighted Space, and Esc closes ONIWA. The key event router leaves active IME composition alone.
 - Labels are local UserDefaults data. No analytics or network requests.
