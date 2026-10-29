@@ -12,7 +12,7 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 - Set a display name and search aliases (e.g. `shumi chrome`) by clicking the pencil.
 - Partial, prefix and subsequence search. **While typing in the search field**, ↑ / ↓ select results, Enter switches to the highlighted Space, and Esc closes ONIWA. The key event router leaves active IME composition alone.
 - Labels are local UserDefaults data. No analytics or network requests.
-- Space discovery uses private **read-only** SkyLight symbols. Switching posts the standard `Ctrl+← / →` shortcut via Core Graphics (not AppleScript/System Events). It now confirms **each neighboring Space** before continuing; it stops on unexpected movement, disappearing Spaces, or reordering.
+- Space discovery uses private **read-only** SkyLight symbols. Switching posts the standard `Ctrl+← / →` shortcut through Core Graphics with a **HID-system-state event source**, explicit Control-key down/up, and the arrow-key Fn/NumericPad flags required on some macOS versions (not AppleScript/System Events). It now confirms **each neighboring Space** before continuing; it stops on unexpected movement, disappearing Spaces, or reordering.
 
 ## Build (macOS)
 
@@ -54,7 +54,7 @@ ONIWA now checks macOS key-event posting permission with `CGPreflightPostEventAc
 
 - **Permission denied:** System Settings → Privacy & Security → Accessibility → allow the actual `build/ONIWA.app` you run. Restart ONIWA after granting it.
 - **Already enabled but still denied:** confirm the app path and signing identity. Quit the running ONIWA, remove the stale entry if necessary, and add the current build again.
-- **Shortcut posted but Space did not move:** verify System Settings → Keyboard → Keyboard Shortcuts → Mission Control has Ctrl+← and Ctrl+→ enabled; ONIWA reports a transition timeout rather than false success.
+- **Shortcut posted but Space did not move:** first try physical `Ctrl+←` and `Ctrl+→` on the target display. If those do not move between Spaces, verify System Settings → Keyboard → Keyboard Shortcuts → Mission Control. If physical keys work but ONIWA times out, inspect the HID simulation and display targeting; changing Accessibility permissions again will not fix that difference.
 - **Diagnostic:** `庭 → ショートカット診断…` also shows Core Graphics key-posting permission status.
 - Without `ONIWA_CODESIGN_IDENTITY`, development builds use ad-hoc signing; rebuilding can change the code identity macOS uses for authorization. For repeated updates, use a persistent local signing identity and the same app path. Do not run blanket `tccutil reset` commands because they revoke permissions for unrelated apps.
 ## Manual switching checks (before merging)
@@ -77,6 +77,10 @@ ONIWA now checks macOS key-event posting permission with `CGPreflightPostEventAc
 - Spaces can reorder or disappear; ONIWA rechecks IDs before switching, but complex transitions still need real-world testing.
 - The recommended hotkey is Option+Space; it may type a nonbreaking space or conflict with macOS/third-party shortcuts on some computers. Use the recorder to select another combination when needed. A successful Carbon registration does not guarantee events are delivered.
 - The draft prioritizes the search flow. Visual free-placement maps and managing windows are out of scope for v0.1.
+
+## macOS 26/27 simulated Space shortcuts
+
+On macOS 27, a Core Graphics event with only `.maskControl` can be ignored by Mission Control even when Accessibility permission is granted and the physical keyboard works. ONIWA reproduces the verified four-event sequence (Control down, Arrow down/up with Control+SecondaryFn+NumericPad, Control up) using `.hidSystemState` and `.cghidEventTap`. Reference: [OpenLogi #1653](https://github.com/AprilNEA/OpenLogi/issues/1653) and [spacekit research](https://github.com/cehbz/spacekit/blob/main/macos-spaces-research.md). This **still requires a real-Mac test** on ONIWA before merging, especially with Sidecar.
 
 ## Acknowledgements
 
