@@ -31,6 +31,15 @@ The `build.sh` script is POSIX sh, callable from **fish** with `sh build.sh`. Th
 
 macOS may request **Automation** permission for controlling System Events on the first Space switch. Enable the default `Control+Left / Control+Right` shortcuts under System Settings → Keyboard → Keyboard Shortcuts → Mission Control. The menu-bar **庭 → ショートカット** allows choosing the recommended `⌥Space`, the previous presets, or **ショートカットを記録…** to capture any combination with ⌘, ⌃ or ⌥ plus another key. Press the combination in the recording field and click **設定する**; cancel or registration failure restores the previous shortcut. **庭 → ショートカット診断…** shows whether Carbon registration succeeded and the number of events ONIWA actually received since launch. Registration success alone does not guarantee delivery: a system or other application shortcut can intercept the keys.
 
+## macOS permission troubleshooting
+
+If selecting a Space displays a red error, the search and SkyLight enumeration have worked; **the System Events AppleScript step failed**. The updated UI reports the actual AppleScript error code instead of always claiming an Automation denial.
+
+- **-1743:** System Settings → Privacy & Security → Automation → ONIWA → allow **System Events**.
+- **-1719:** System Settings → Privacy & Security → Accessibility → enable **ONIWA**.
+- **Other code:** record the numeric code and brief message; the cause may be unrelated to permissions.
+- The system may prompt for access only after the first attempted Space switch. Quit/relaunch ONIWA after changing a denied permission, then retry.
+- Development builds are ad-hoc signed; rebuilding can change the code identity macOS uses for authorization. Do not run blanket `tccutil reset` commands because they revoke permissions for unrelated apps.
 ## Manual switching checks (before merging)
 
 1. In **System Settings → Keyboard → Keyboard Shortcuts → Mission Control**, enable **Move left/right a space** (`Ctrl+←` and `Ctrl+→`); ONIWA uses those built-in shortcuts.
