@@ -253,21 +253,43 @@ final class SpaceSwitcher {
                     return .failure(SwitchFailure(
                         "macOSがキー操作の送信を許可していません。アクセシビリティでONIWA（現在のビルド）を許可し、アプリを再起動してください。変更後も直らない場合は、署名とアプリの保存先を確認してください。"))
                 }
-                let code: CGKeyCode = direction == .right ? 124 : 123
-                guard let keyDown = CGEvent(keyboardEventSource: nil,
-                                            virtualKey: code, keyDown: true),
-                      let keyUp = CGEvent(keyboardEventSource: nil,
-                                          virtualKey: code, keyDown: false) else {
+                // On macOS 26/27, Mission Control can ignore a synthetic
+                // Ctrl+Arrow sent with only .maskControl. Reproduce the
+                // hardware keyboard event sequence instead:
+                //   Ctrl down -> Arrow down/up (Control|Fn|NumericPad) -> Ctrl up.
+                // Use a HID-system-state event source, not a session-level one.
+                // See: AprilNEA/OpenLogi#1653 (verified on macOS 27.0.1).
+                let arrowCode: CGKeyCode = direction == .right ? 124 : 123
+                let controlCode: CGKeyCode = 59
+                guard let source = CGEventSource(stateID: .hidSystemState),
+                      let controlDown = CGEvent(keyboardEventSource: source,
+                                                virtualKey: controlCode, keyDown: true),
+                      let arrowDown = CGEvent(keyboardEventSource: source,
+                                              virtualKey: arrowCode, keyDown: true),
+                      let arrowUp = CGEvent(keyboardEventSource: source,
+                                            virtualKey: arrowCode, keyDown: false),
+                      let controlUp = CGEvent(keyboardEventSource: source,
+                                              virtualKey: controlCode, keyDown: false) else {
                     return .failure(SwitchFailure(
-                        "Space切り替え用のキーイベントを作成できませんでした。"))
+                        "Space切り替え用のHIDキーイベントを生成できませんでした。"))
                 }
-                keyDown.flags = .maskControl
-                keyUp.flags = .maskControl
-                keyDown.post(tap: .cghidEventTap)
-                Thread.sleep(forTimeInterval: 0.015)
-                keyUp.post(tap: .cghidEventTap)
-                // Posting does not report whether macOS actually switched.
-                // waitForNeighbor below is the source of truth.
+
+                let arrowFlags: CGEventFlags = [
+                    .maskControl, .maskSecondaryFn, .maskNumericPad
+                ]
+                controlDown.flags = .maskControl
+                arrowDown.flags = arrowFlags
+                arrowUp.flags = arrowFlags
+                controlUp.flags = []
+
+                controlDown.post(tap: .cghidEventTap)
+                arrowDown.post(tap: .cghidEventTap)
+                Thread.sleep(forTimeInterval: 0.012)
+                arrowUp.post(tap: .cghidEventTap)
+                controlUp.post(tap: .cghidEventTap)
+
+                // CGEvent.post has no acknowledgement. The verified Space ID
+                // transition below, not successful posting, determines success.
 
                 switch waitForNeighbor(
                     previous: current, expected: nextSpaceID,
@@ -281,7 +303,7 @@ final class SpaceSwitcher {
                     return .failure(SwitchFailure("切り替え中にモニターを認識できなくなりました。"))
                 case .timedOut:
                     return .failure(SwitchFailure(
-                        "Spaceの移動を確認できません。Mission Controlの「左/右の操作スペースに移動」ショートカットが有効か確認してください。"))
+                        "Spaceの移動を確認できません。物理キーボードの⌃+←/→で移動できるか確認してください。手動操作が成功する場合、ONIWAのキー送信またはモニター判定が原因の可能性があります。"))
                 }
             }
         }
