@@ -267,8 +267,8 @@ final class SpaceSwitcher {
                     switch code {
                     case -1743:
                         message = "System Eventsへの操作が拒否されました（-1743）。「システム設定 → プライバシーとセキュリティ → オートメーション → ONIWA → System Events」で許可してください。"
-                    case -1719:
-                        message = "アクセシビリティ操作が拒否されました（-1719）。「システム設定 → プライバシーとセキュリティ → アクセシビリティ」でONIWAを許可してください。"
+                    case -1719, 1002:
+                        message = "キー操作が拒否されました（コード: \(code.map(String.init) ?? "不明")）。「システム設定 → プライバシーとセキュリティ → アクセシビリティ」でONIWAを許可してください。更新直後に発生した場合は、ONIWAを終了し、許可を一度オフ→オンにして再起動してください。"
                     default:
                         message = "Space切り替え中にAppleScriptエラーが発生しました（コード: \(code.map(String.init) ?? "不明")）。\(detail)"
                     }
