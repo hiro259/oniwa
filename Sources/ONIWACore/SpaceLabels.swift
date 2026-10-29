@@ -88,6 +88,17 @@ public final class SpaceLabelStore {
             if label.isEmpty { stored.removeValue(forKey: key) }
             else { stored[key] = label }
             persist()
+            // Do not resurrect a previously saved v1 label after the user
+            // deletes or overrides its v2 replacement.
+            if let legacyKey = identity.legacyUUIDKey {
+                let oldKeys = legacy.keys.filter { $0.lowercased() == legacyKey }
+                if !oldKeys.isEmpty {
+                    for oldKey in oldKeys { legacy.removeValue(forKey: oldKey) }
+                    if let data = try? JSONEncoder().encode(legacy) {
+                        defaults.set(data, forKey: Self.v1Key)
+                    }
+                }
+            }
         } else {
             if label.isEmpty { sessionOnly.removeValue(forKey: identity.runtimeKey) }
             else { sessionOnly[identity.runtimeKey] = label }
