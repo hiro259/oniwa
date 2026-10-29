@@ -187,7 +187,7 @@ enum InstantSpaceGesture {
             return nil
         }
         let payload = ioHIDPayload(for: event)
-        guard payload.count <= UInt16.max else { return nil }
+        guard payload.count <= Int(UInt16.max) else { return nil }
         let length = payload.count
         bytes.append(UInt8((length >> 8) & 0xFF))
         bytes.append(UInt8(length & 0xFF))
