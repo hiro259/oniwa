@@ -163,7 +163,7 @@ final class SpaceReader {
     }
 }
 
-/// Uses standard Mission Control shortcuts via System Events, NOT private writes.
+/// Uses standard Mission Control shortcuts via Core Graphics, NOT private writes.
 /// The private SkyLight API is strictly read-only. A jump stops rather than
 /// continuing blindly if a Space disappears, gets reordered, or the observed
 /// transition does not land on the expected immediate neighbor.
@@ -244,36 +244,30 @@ final class SpaceSwitcher {
             case .arrived:
                 return .success(())
             case let .move(direction, nextSpaceID):
-                let code = direction == .right ? 124 : 123
-                var scriptError: NSDictionary?
-                let script = NSAppleScript(source:
-                    "tell application \"System Events\" to key code \(code) using control down")
-                guard let script else {
-                    return .failure(SwitchFailure("切り替え操作を作成できませんでした。"))
+                // Post the standard Control+arrow Mission Control shortcut
+                // directly through Core Graphics. This avoids sending Apple
+                // Events to System Events, which can fail with error 1002 even
+                // when the app has a working global shortcut.
+                if !CGPreflightPostEventAccess() {
+                    _ = CGRequestPostEventAccess()
+                    return .failure(SwitchFailure(
+                        "macOSがキー操作の送信を許可していません。アクセシビリティでONIWA（現在のビルド）を許可し、アプリを再起動してください。変更後も直らない場合は、署名とアプリの保存先を確認してください。"))
                 }
-                let result = script.executeAndReturnError(&scriptError)
-                if result == nil || scriptError != nil {
-                    // NSAppleScript errors distinguish Automation denial (-1743)
-                    // from Accessibility denial (-1719). They can also indicate
-                    // script execution errors unrelated to permissions.
-                    let code = (scriptError?[NSAppleScript.errorNumber] as? NSNumber)?.intValue
-                        ?? (scriptError?[NSAppleScript.errorNumber] as? Int)
-                    let detail = (scriptError?[NSAppleScript.errorMessage] as? String)
-                        ?? (scriptError?[NSAppleScript.errorBriefMessage] as? String)
-                        ?? "詳細なし"
-                    NSLog("ONIWA: System Events script failed (code=%@): %@",
-                          code.map(String.init) ?? "unknown", detail)
-                    let message: String
-                    switch code {
-                    case -1743:
-                        message = "System Eventsへの操作が拒否されました（-1743）。「システム設定 → プライバシーとセキュリティ → オートメーション → ONIWA → System Events」で許可してください。"
-                    case -1719, 1002:
-                        message = "キー操作が拒否されました（コード: \(code.map(String.init) ?? "不明")）。「システム設定 → プライバシーとセキュリティ → アクセシビリティ」でONIWAを許可してください。更新直後に発生した場合は、ONIWAを終了し、許可を一度オフ→オンにして再起動してください。"
-                    default:
-                        message = "Space切り替え中にAppleScriptエラーが発生しました（コード: \(code.map(String.init) ?? "不明")）。\(detail)"
-                    }
-                    return .failure(SwitchFailure(message))
+                let code: CGKeyCode = direction == .right ? 124 : 123
+                guard let keyDown = CGEvent(keyboardEventSource: nil,
+                                            virtualKey: code, keyDown: true),
+                      let keyUp = CGEvent(keyboardEventSource: nil,
+                                          virtualKey: code, keyDown: false) else {
+                    return .failure(SwitchFailure(
+                        "Space切り替え用のキーイベントを作成できませんでした。"))
                 }
+                keyDown.flags = .maskControl
+                keyUp.flags = .maskControl
+                keyDown.post(tap: .cghidEventTap)
+                Thread.sleep(forTimeInterval: 0.015)
+                keyUp.post(tap: .cghidEventTap)
+                // Posting does not report whether macOS actually switched.
+                // waitForNeighbor below is the source of truth.
 
                 switch waitForNeighbor(
                     previous: current, expected: nextSpaceID,
