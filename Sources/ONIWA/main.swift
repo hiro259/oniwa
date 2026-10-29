@@ -148,7 +148,7 @@ struct SearchView: View {
                     ForEach(state.results) { space in
                         HStack(spacing: 9) {
                             Image(systemName: space.kind == 4 ? "arrow.up.left.and.arrow.down.right" : "display")
-                                .foregroundStyle(space.isCurrent ? Color.green : Color.secondary)
+                                .foregroundStyle(.secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
                                     Text(state.labels.label(for: space.identity)?.name.isEmpty == false
@@ -158,12 +158,12 @@ struct SearchView: View {
                                             ? .semibold : .regular)
                                         .lineLimit(1)
                                     if space.isCurrent {
-                                        Label("表示中", systemImage: "checkmark.circle.fill")
-                                            .font(.caption2.weight(.bold))
-                                            .foregroundStyle(Color.green)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.green.opacity(0.14), in: Capsule())
+                                        Label("current", systemImage: "checkmark.circle.fill")
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(Color.secondary.opacity(0.09), in: Capsule())
                                             .fixedSize()
                                             .help("このモニターで現在表示されているSpace")
                                     }
@@ -186,16 +186,16 @@ struct SearchView: View {
                         }
                         .padding(8)
                         // The accent background indicates keyboard selection.
-                        // A green border and explicit badge indicate the actual
-                        // visible Space, even when a different result is selected.
+                        // A subtle neutral border and "current" badge indicate the
+                        // visible Space, even when another result is selected.
                         .background(space.id == state.selectedID
                             ? Color.accentColor.opacity(0.16)
-                            : (space.isCurrent ? Color.green.opacity(0.06) : Color.clear))
+                            : (space.isCurrent ? Color.secondary.opacity(0.04) : Color.clear))
                         .clipShape(RoundedRectangle(cornerRadius: 7))
                         .overlay {
                             RoundedRectangle(cornerRadius: 7)
-                                .strokeBorder(space.isCurrent ? Color.green.opacity(0.72) : Color.clear,
-                                              lineWidth: 1.5)
+                                .strokeBorder(space.isCurrent ? Color.secondary.opacity(0.38) : Color.clear,
+                                              lineWidth: 1)
                                 .allowsHitTesting(false)
                         }
                         .contentShape(Rectangle())
