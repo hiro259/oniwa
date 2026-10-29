@@ -59,7 +59,7 @@ public final class SpaceLabelStore {
     private let defaults: UserDefaults
     private var stored: [String: SpaceLabel]
     private var sessionOnly: [String: SpaceLabel] = [:]
-    private let legacy: [String: SpaceLabel]
+    private var legacy: [String: SpaceLabel]
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -111,13 +111,21 @@ public final class SpaceLabelStore {
             guard let uuid = identity.uuid, counts[uuid] == 1,
                   let key = identity.persistentKey, stored[key] == nil,
                   let legacyKey = identity.legacyUUIDKey,
-                  let previous = legacy.first(where: {
+                  let old = legacy.first(where: {
                       $0.key.lowercased() == legacyKey
-                  })?.value, !previous.isEmpty else { continue }
-            stored[key] = previous
+                  }), !old.value.isEmpty else { continue }
+            stored[key] = old.value
+            // Consume this migration record so clearing the new label cannot
+            // resurrect it on the next refresh or application launch.
+            legacy.removeValue(forKey: old.key)
             migrated = true
         }
-        if migrated { persist() }
+        if migrated {
+            persist()
+            if let data = try? JSONEncoder().encode(legacy) {
+                defaults.set(data, forKey: Self.v1Key)
+            }
+        }
     }
 
     private func persist() {
