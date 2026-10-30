@@ -778,6 +778,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                    keyEquivalent: "")
         diagnosis.target = self
         menu.addItem(diagnosis)
+        let switchLog = NSMenuItem(title: "切り替え診断ログを開く…",
+                                   action: #selector(openSwitchLog),
+                                   keyEquivalent: "")
+        switchLog.target = self
+        menu.addItem(switchLog)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit ONIWA", action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items { item.target = self }
@@ -860,6 +865,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.informativeText = shortcut?.registrationError ?? "macOSまたは別のアプリと競合している可能性があります。"
         alert.alertStyle = .warning
         alert.runModal()
+    }
+
+    @objc private func openSwitchLog() {
+        let url = SpaceSwitchDiagnostics.logURL
+        if FileManager.default.fileExists(atPath: url.path) {
+            NSWorkspace.shared.open(url)
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "切り替え診断ログはまだありません"
+            alert.informativeText = "Spaceの切り替えを一度行うと、ローカルに記録されます。"
+            alert.runModal()
+        }
     }
 
     @objc private func showShortcutDiagnosis() {
