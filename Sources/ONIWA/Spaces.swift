@@ -429,6 +429,33 @@ final class SpaceSwitcher {
                         beforeOthers: beforeOthers, timeout: 0.9
                     ) {
                     case .confirmed:
+                        // Optional A/B experiment: wait beyond the observed
+                        // 150-350ms delayed Space snap-back before posting
+                        // another gesture. This is NOT a permanent fast-mode
+                        // speed change; the menu toggle defaults to OFF.
+                        if InstantSwitchSettings.pacingProbeEnabled {
+                            let startedAt = ProcessInfo.processInfo.systemUptime
+                            Thread.sleep(forTimeInterval: 0.45)
+                            let after = reader.displays(includeAppNames: false)
+                            let outcome = SpaceSwitchObservation.evaluate(
+                                targetDisplay: target.displayID,
+                                beforeTarget: current,
+                                expectedTarget: nextSpaceID,
+                                beforeOthers: beforeOthers,
+                                after: currentSpaceIDs(after))
+                            let actual = after.first(where: { $0.id == target.displayID })?.currentID
+                            let elapsedMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
+                            SpaceSwitchDiagnostics.record(
+                                "instant-paced-settle t=\(elapsedMS)ms "
+                                + "display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
+                                + "expected=\(nextSpaceID) actual=\(actual.map(String.init) ?? "missing") "
+                                + "outcome=\(outcome)")
+                            guard outcome == .confirmed else {
+                                return .failure(SwitchFailure(
+                                    "瞬時切り替え後450ms以内にSpaceが再移動しました。"
+                                    + "診断のため次のジェスチャーを送らず停止しました。"))
+                            }
+                        }
                         // The next loop verifies the next neighboring Space.
                         continue
                     case .wrongSpace:
