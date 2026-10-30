@@ -28,7 +28,9 @@ enum SpaceSwitchDiagnostics {
         let directory = logURL.deletingLastPathComponent()
         do {
             try manager.createDirectory(at: directory, withIntermediateDirectories: true)
-            let stamp = ISO8601DateFormatter().string(from: Date())
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let stamp = formatter.string(from: Date())
             let line = "\(stamp) \(message)\n"
             let data = Data(line.utf8)
             if !manager.fileExists(atPath: logURL.path) {
