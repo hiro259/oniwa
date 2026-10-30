@@ -21,7 +21,14 @@ final class SearchState: ObservableObject {
     @Published var errorMessage: String?
     @Published var isSwitching = false
     @Published var shortcutDescription = "⌥ Space"
+    @Published var pairRevision = 0
+    @Published var pairEditing = false
+    @Published var pairNameDraft = ""
+    @Published var pairFirstKey = ""
+    @Published var pairSecondKey = ""
+    @Published var editingPairID: UUID?
     let labels = SpaceLabelStore()
+    let pairStore = SpacePairStore()
     private var editingIdentity: SpaceIdentity?
     let switcher = SpaceSwitcher()
     var hidePanel: (() -> Void)?
@@ -48,30 +55,188 @@ final class SearchState: ObservableObject {
         }
     }
 
+    /// Keep individual Spaces in the existing result list. Pair rows are
+    /// additional results and share the same keyboard selection mechanism.
+    func pairResultID(_ pair: SpacePair) -> String { "pair:\(pair.id.uuidString)" }
+
+    func spaceName(_ space: SpaceEntry) -> String {
+        let name = labels.label(for: space.identity)?.name ?? ""
+        return name.isEmpty ? space.defaultName : name
+    }
+
+    func resolvedSpaces(for pair: SpacePair) -> (SpaceEntry, SpaceEntry)? {
+        guard let identities = SpacePairResolver.resolve(pair, in: all.map(\.identity)),
+              let first = all.first(where: { $0.identity == identities.0 }),
+              let second = all.first(where: { $0.identity == identities.1 })
+        else { return nil }
+        return (first, second)
+    }
+
+    var pairResults: [SpacePair] {
+        _ = pairRevision
+        return FuzzySearch.ranked(pairStore.pairs, query: query) { pair in
+            var fields = [SearchField(text: pair.name, kind: .name)]
+            if let (first, second) = resolvedSpaces(for: pair) {
+                fields += [
+                    SearchField(text: spaceName(first), kind: .keyword),
+                    SearchField(text: spaceName(second), kind: .keyword)
+                ]
+                fields += (first.appNames + second.appNames)
+                    .map { SearchField(text: $0, kind: .app) }
+            }
+            return fields
+        }
+    }
+
+    var allResultIDs: [String] {
+        pairResults.map { pairResultID($0) } + results.map(\.id)
+    }
+
+    var pairEligibleSpaces: [SpaceEntry] {
+        all.filter { $0.identity.persistentKey != nil }
+    }
+
+    var pairSecondChoices: [SpaceEntry] {
+        guard let first = pairEligibleSpaces.first(where: {
+            $0.identity.persistentKey == pairFirstKey
+        }) else { return [] }
+        return pairEligibleSpaces.filter { $0.displayID != first.displayID }
+    }
+
+    var pairCanSave: Bool {
+        guard !SpacePair.cleanedName(pairNameDraft).isEmpty,
+              let first = pairEligibleSpaces.first(where: {
+                  $0.identity.persistentKey == pairFirstKey
+              }),
+              let second = pairSecondChoices.first(where: {
+                  $0.identity.persistentKey == pairSecondKey
+              }),
+              let a = SpacePairTarget(identity: first.identity),
+              let b = SpacePairTarget(identity: second.identity)
+        else { return false }
+        let sample = SpacePair(name: pairNameDraft, first: a, second: b)
+        return SpacePairResolver.resolve(sample, in: all.map(\.identity)) != nil
+    }
+
+    func newPair() {
+        let choices = pairEligibleSpaces
+        guard let first = choices.first,
+              let second = choices.first(where: { $0.displayID != first.displayID })
+        else {
+            errorMessage = "セットには別々の2つのモニターと、UUIDのあるSpaceが必要です。"
+            return
+        }
+        pairNameDraft = ""
+        pairFirstKey = first.identity.persistentKey ?? ""
+        pairSecondKey = second.identity.persistentKey ?? ""
+        editingPairID = nil
+        pairEditing = true
+    }
+
+    func beginPairEdit(_ pair: SpacePair) {
+        pairNameDraft = pair.name
+        pairFirstKey = pair.first.persistentKey
+        pairSecondKey = pair.second.persistentKey
+        editingPairID = pair.id
+        pairEditing = true
+    }
+
+    func firstPairSpaceChanged() {
+        if !pairSecondChoices.contains(where: {
+            $0.identity.persistentKey == pairSecondKey
+        }) {
+            pairSecondKey = pairSecondChoices.first?.identity.persistentKey ?? ""
+        }
+    }
+
+    func savePair() {
+        // Re-read live Spaces before persisting; never save a position-only or
+        // stale target after a display is disconnected or a Space recreated.
+        guard pairCanSave,
+              let first = pairEligibleSpaces.first(where: {
+                  $0.identity.persistentKey == pairFirstKey
+              }),
+              let second = pairSecondChoices.first(where: {
+                  $0.identity.persistentKey == pairSecondKey
+              }),
+              let a = SpacePairTarget(identity: first.identity),
+              let b = SpacePairTarget(identity: second.identity),
+              let resolved = SpacePairResolver.resolve(
+                  SpacePair(name: pairNameDraft, first: a, second: b),
+                  in: SpaceReader.shared.displays(includeAppNames: false)
+                      .flatMap(\.spaces).map(\.identity))
+        else {
+            errorMessage = "セットを保存できません。対象のSpaceとモニターを確認してください。"
+            pairEditing = false
+            return
+        }
+        _ = resolved
+        let pair = SpacePair(id: editingPairID ?? UUID(),
+                             name: pairNameDraft, first: a, second: b)
+        guard pairStore.save(pair) else { return }
+        pairRevision += 1
+        pairEditing = false
+        selectedID = pairResultID(pair)
+    }
+
+    func deletePair() {
+        if let id = editingPairID {
+            pairStore.delete(id: id)
+            pairRevision += 1
+        }
+        pairEditing = false
+        editingPairID = nil
+        selectedID = allResultIDs.first
+    }
+
+    func activatePair(_ pair: SpacePair) {
+        guard !isSwitching else { return }
+        guard resolvedSpaces(for: pair) != nil else {
+            errorMessage = "セットのSpaceが見つかりません。鉛筆ボタンから再設定してください。"
+            return
+        }
+        isSwitching = true
+        hidePanel?()
+        switcher.switchToPair(pair) { [weak self] outcome in
+            guard let self else { return }
+            self.isSwitching = false
+            if case .failure(let error) = outcome {
+                self.errorMessage = error.localizedDescription
+                self.showError()
+            }
+        }
+    }
+
     func refresh() {
         groups = SpaceReader.shared.displays()
         if !groups.isEmpty { labels.reconcile(groups.flatMap(\.spaces).map(\.identity)) }
         errorMessage = SpaceReader.shared.available
             ? (groups.isEmpty ? "No Spaces found. This macOS version may be unsupported." : nil)
             : "Could not load SkyLight. This macOS version may be unsupported."
-        if !results.contains(where: { $0.id == selectedID }) {
-            selectedID = results.first?.id
+        if !allResultIDs.contains(selectedID ?? "") {
+            selectedID = allResultIDs.first
         }
     }
 
     /// Keyboard navigation stays active even when the search TextField has focus.
     func moveSelection(by offset: Int) {
-        let options = results
-        guard !options.isEmpty else { return }
-        let index = options.firstIndex(where: { $0.id == selectedID }) ?? (offset > 0 ? -1 : 0)
-        let next = min(max(index + offset, 0), options.count - 1)
-        selectedID = options[next].id
+        let ids = allResultIDs
+        guard !ids.isEmpty else { return }
+        let index = ids.firstIndex(of: selectedID ?? "") ?? (offset > 0 ? -1 : 0)
+        let next = min(max(index + offset, 0), ids.count - 1)
+        selectedID = ids[next]
     }
 
     func activateSelected() {
-        guard let selected = results.first(where: { $0.id == selectedID })
-                ?? results.first else { return }
-        activate(selected)
+        if let pair = pairResults.first(where: { pairResultID($0) == selectedID }) {
+            activatePair(pair)
+        } else if let selected = results.first(where: { $0.id == selectedID }) {
+            activate(selected)
+        } else if let pair = pairResults.first {
+            activatePair(pair)
+        } else if let space = results.first {
+            activate(space)
+        }
     }
 
     func beginEdit(_ space: SpaceEntry) {
