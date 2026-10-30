@@ -758,12 +758,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: SearchPanel?
     private var statusItem: NSStatusItem?
     private var keyboardMonitor: Any?
+    private var spaceEventObserver: SpaceWorkspaceEventObserver?
     private var instantSwitchItem: NSMenuItem?
     private var instantPacingItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        spaceEventObserver = SpaceWorkspaceEventObserver()
         installKeyboardNavigation()
         let shortcut = GlobalShortcut()
         shortcut.onPress = { [weak self] in self?.togglePanel() }
