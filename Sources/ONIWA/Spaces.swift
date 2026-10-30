@@ -296,7 +296,12 @@ final class SpaceSwitcher {
             return .failure(SwitchFailure("現在表示中のSpaceを確認できません。"))
         }
         // No reason to manipulate the cursor when that desktop is already visible.
-        if originalCurrentID == target.systemID { return .success(()) }
+        if originalCurrentID == target.systemID {
+            // A previously visible Space can still contain an app different
+            // from the name inferred by ONIWA; capture that association too.
+            traceSpaceMapping(target, reader: reader)
+            return .success(())
+        }
 
         guard let displayBounds = reader.displayBounds(for: target.displayID) else {
             return .failure(SwitchFailure(
@@ -353,7 +358,7 @@ final class SpaceSwitcher {
 
             switch decision {
             case .arrived:
-                return .success(())
+                return verifySettledTarget(target, reader: reader)
             case let .move(direction, nextSpaceID):
                 SpaceSwitchDiagnostics.record(
                     "step target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
@@ -507,6 +512,58 @@ final class SpaceSwitcher {
         // If the system never acknowledged arrival, never report success.
         return .failure(SwitchFailure(
             "Spaceの切り替えを完了できませんでした。"))
+    }
+
+    /// The read-only Current Space ID may update ahead of the visible desktop.
+    /// A second sample prevents reporting immediate success if the Space keeps
+    /// changing. Also capture what ONIWA associates with each visible Space:
+    /// an ID-confirmed switch cannot prove the selected label was correct.
+    private func verifySettledTarget(_ target: SpaceEntry,
+                                     reader: SpaceReader) -> Result<Void, Error> {
+        Thread.sleep(forTimeInterval: 0.30)
+        let live = reader.displays(includeAppNames: false)
+        let targetDisplay = live.first(where: { $0.id == target.displayID })
+        let actual = targetDisplay?.currentID
+        let matching = targetDisplay?.spaces.filter { $0.identity == target.identity } ?? []
+        SpaceSwitchDiagnostics.record(
+            "single-settled display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
+            + "expected=\(target.systemID) current=\(actual.map(String.init) ?? "missing") "
+            + "uuidMatchCount=\(matching.count)"
+        )
+        // A target may have been deleted or recreated after the last step.
+        guard actual == target.systemID, matching.count == 1 else {
+            SpaceSwitchDiagnostics.record("single-settled FAILED: current or identity changed")
+            return .failure(SwitchFailure(
+                "切り替え直後にSpaceの状態が変わりました。"
+                + "目的のSpaceを確認できないため、完了扱いにしません。"))
+        }
+        traceSpaceMapping(target, reader: reader)
+        return .success(())
+    }
+
+    /// Only process names, manual labels, Space IDs and short UUIDs. No window
+    /// titles, browser tabs or search queries. This helps distinguish a
+    /// wrong Space *selection* from a wrong OS-level *transition*.
+    private func traceSpaceMapping(_ target: SpaceEntry, reader: SpaceReader) {
+        let live = reader.displays()
+        let store = SpaceLabelStore()
+        guard let group = live.first(where: { $0.id == target.displayID }) else {
+            SpaceSwitchDiagnostics.record("space-map missing display")
+            return
+        }
+        for space in group.spaces {
+            let label = store.label(for: space.identity)?.name ?? ""
+            let labelText = SpaceSwitchDiagnostics.safe(label)
+            let apps = space.appNames.prefix(4).map(SpaceSwitchDiagnostics.safe)
+                .joined(separator: ",")
+            let uuid = space.identity.uuid.map { String($0.prefix(8)) } ?? "none"
+            SpaceSwitchDiagnostics.record(
+                "space-map display=\(SpaceSwitchDiagnostics.shortDisplay(space.displayID)) "
+                + "id=\(space.systemID) uuid=\(uuid) "
+                + "current=\(space.isCurrent) "
+                + "name=[\(labelText)] apps=[\(apps)]"
+            )
+        }
     }
 
     private enum StepOutcome {
