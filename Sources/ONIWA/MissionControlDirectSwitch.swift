@@ -24,16 +24,22 @@ enum MissionControlDirectSwitch {
     private static let displayID = "mc.display"
     private static let maximumDepth = 7
 
+    private struct DirectFailure: LocalizedError {
+        let message: String
+        init(_ message: String) { self.message = message }
+        var errorDescription: String? { message }
+    }
+
     static func press(target: SpaceEntry, reader: SpaceReader,
                       original: [DisplayGroup]) -> Result<Void, Error> {
         guard AXIsProcessTrusted() else {
-            return .failure(SwitchFailure(
+            return .failure(DirectFailure(
                 "Mission Control直接移動にはアクセシビリティの許可が必要です。"
                 + "システム設定でONIWAの許可を確認してください。"))
         }
         let version = ProcessInfo.processInfo.operatingSystemVersion
         guard version.majorVersion == 26 || version.majorVersion == 27 else {
-            return .failure(SwitchFailure(
+            return .failure(DirectFailure(
                 "Mission Control直接移動はmacOS 26/27のみ試験対応しています。"))
         }
         guard let group = original.first(where: { $0.id == target.displayID }),
@@ -43,7 +49,7 @@ enum MissionControlDirectSwitch {
               }),
               let bounds = reader.displayBounds(for: target.displayID),
               let physicalDisplay = screenNumber(for: target.displayID) else {
-            return .failure(SwitchFailure(
+            return .failure(DirectFailure(
                 "移動先Spaceまたはモニターを一意に特定できません。"))
         }
 
@@ -51,7 +57,7 @@ enum MissionControlDirectSwitch {
         var openedByONIWA = false
         if candidateDisplayLists().isEmpty {
             guard openMissionControl() else {
-                return .failure(SwitchFailure(
+                return .failure(DirectFailure(
                     "Mission Controlを開けませんでした。診断ログを確認してください。"))
             }
             openedByONIWA = true
@@ -107,7 +113,7 @@ enum MissionControlDirectSwitch {
                         + " index=\(targetIndex) total=\(buttons.count)"
                         + " error=\(action.rawValue)")
                     guard action == .success else {
-                        return .failure(SwitchFailure(
+                        return .failure(DirectFailure(
                             "Mission ControlのSpaceボタンを押せませんでした"
                             + "（AXエラー \(action.rawValue)）。"))
                     }
@@ -119,7 +125,7 @@ enum MissionControlDirectSwitch {
         }
         SpaceSwitchDiagnostics.record("mc-direct abort reason=\(lastReason)")
         // Never send a fallback gesture: Mission Control may still be open.
-        return .failure(SwitchFailure(
+        return .failure(DirectFailure(
             "Mission Control直接移動を安全に実行できませんでした（\(lastReason)）。"
             + " 必要ならEscapeキーでMission Controlを閉じてください。"))
     }
@@ -181,9 +187,11 @@ enum MissionControlDirectSwitch {
         if let explicit = attribute(element, "AXDisplayID") as? NSNumber {
             return explicit.uint32Value == number
         }
-        guard let raw = attribute(element, "AXFrame") as? AXValue else { return false }
+        guard let raw = attribute(element, "AXFrame"),
+              CFGetTypeID(raw) == AXValueGetTypeID() else { return false }
+        let frameValue = unsafeBitCast(raw, to: AXValue.self)
         var frame = CGRect.zero
-        guard AXValueGetValue(raw, .cgRect, &frame) else { return false }
+        guard AXValueGetValue(frameValue, .cgRect, &frame) else { return false }
         let intersection = frame.intersection(bounds)
         guard !intersection.isNull, frame.width > 0, frame.height > 0 else {
             return false
