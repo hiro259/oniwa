@@ -40,14 +40,41 @@ public struct SpaceIdentity: Hashable {
 
 public struct SpaceLabel: Codable, Equatable {
     public var name: String
+    /// Previous ONIWA versions saved space-delimited aliases in this field.
+    /// Preserve it for decoding existing v1/v2 labels.
     public var aliases: String
+    /// New labels use an array so "web development" can be ONE tag.
+    /// Nil means the record predates structured tags; [] means no tags.
+    public var tags: [String]?
 
-    public init(name: String, aliases: String) {
+    public init(name: String, aliases: String, tags: [String]? = nil) {
         self.name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
         self.aliases = String(aliases.trimmingCharacters(in: .whitespacesAndNewlines).prefix(250))
+        self.tags = tags.map(Self.cleanedTags)
     }
 
-    public var isEmpty: Bool { name.isEmpty && aliases.isEmpty }
+    /// A one-way, nondestructive view of legacy aliases; the first edit saves
+    /// structured tags. Unedited labels still retain their original data.
+    public var searchTags: [String] {
+        tags ?? FuzzySearch.keywords(in: aliases)
+    }
+
+    public static func cleanedTags(_ raw: [String]) -> [String] {
+        var seen = Set<String>()
+        var tags: [String] = []
+        for value in raw {
+            var tag = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if tag.hasPrefix("#") || tag.hasPrefix("＃") { tag.removeFirst() }
+            tag = String(tag.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+            guard !tag.isEmpty else { continue }
+            if seen.insert(FuzzySearch.normalized(tag)).inserted {
+                tags.append(tag)
+            }
+        }
+        return tags
+    }
+
+    public var isEmpty: Bool { name.isEmpty && searchTags.isEmpty }
 }
 
 /// Persists only identities backed by a nonempty Space UUID. For Spaces with
@@ -83,7 +110,15 @@ public final class SpaceLabelStore {
     }
 
     public func update(_ identity: SpaceIdentity, name: String, aliases: String) {
-        let label = SpaceLabel(name: name, aliases: aliases)
+        write(identity, label: SpaceLabel(name: name, aliases: aliases))
+    }
+
+    /// New save path; spaces are valid WITHIN a tag.
+    public func update(_ identity: SpaceIdentity, name: String, tags: [String]) {
+        write(identity, label: SpaceLabel(name: name, aliases: "", tags: tags))
+    }
+
+    private func write(_ identity: SpaceIdentity, label: SpaceLabel) {
         if let key = identity.persistentKey {
             if label.isEmpty { stored.removeValue(forKey: key) }
             else { stored[key] = label }
