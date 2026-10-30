@@ -52,6 +52,9 @@ enum InstantSpaceGesture {
         guard isSupported, CGPreflightPostEventAccess() else { return false }
 
         let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        // Record phase post times only after all events have been sent.
+        // Logging between phases would change the experimental gesture timing.
+        var phasePostUptimeMS: [Int64] = []
         if major >= 27 {
             let naturalScroll = CFPreferencesCopyAppValue(
                 "com.apple.swipescrolldirection" as CFString,
@@ -70,6 +73,7 @@ enum InstantSpaceGesture {
                 pairs.append((augmented, companion))
             }
             for (event, companion) in pairs {
+                phasePostUptimeMS.append(Int64(ProcessInfo.processInfo.systemUptime * 1000))
                 event.post(tap: .cgSessionEventTap)
                 companion.post(tap: .cgSessionEventTap)
             }
@@ -81,8 +85,16 @@ enum InstantSpaceGesture {
                 else { return false }
                 events.append(event)
             }
-            events.forEach { $0.post(tap: .cgSessionEventTap) }
+            for event in events {
+                phasePostUptimeMS.append(Int64(ProcessInfo.processInfo.systemUptime * 1000))
+                event.post(tap: .cgSessionEventTap)
+            }
         }
+        let finishedMS = Int64(ProcessInfo.processInfo.systemUptime * 1000)
+        SpaceSwitchDiagnostics.record(
+            "gesture-post direction=\(right ? "right" : "left") osMajor=\(major) "
+            + "phaseUptimeMs=\(phasePostUptimeMS) postCompleteUptimeMs=\(finishedMS)"
+        )
         return true
     }
 
