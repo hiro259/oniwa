@@ -761,6 +761,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var spaceEventObserver: SpaceWorkspaceEventObserver?
     private var instantSwitchItem: NSMenuItem?
     private var instantPacingItem: NSMenuItem?
+    private var directSwitchItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -811,6 +812,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pacing.target = self
         instantPacingItem = pacing
         menu.addItem(pacing)
+        let direct = NSMenuItem(title: "Mission Control直接移動（試験的）",
+                                action: #selector(toggleMissionControlDirectSwitch),
+                                keyEquivalent: "")
+        direct.toolTip = "Mission Controlを開き、SpaceボタンへAXPressを送ります。"
+            + "従来の瞬時切り替えより優先されます。"
+        direct.state = MissionControlDirectSettings.enabled ? .on : .off
+        direct.target = self
+        directSwitchItem = direct
+        menu.addItem(direct)
         let diagnosis = NSMenuItem(title: "ショートカット診断…",
                                    action: #selector(showShortcutDiagnosis),
                                    keyEquivalent: "")
@@ -824,6 +834,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit ONIWA", action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items { item.target = self }
+        instantSwitchItem?.isEnabled = !MissionControlDirectSettings.enabled
+        instantPacingItem?.isEnabled = !MissionControlDirectSettings.enabled
         item.menu = menu
         statusItem = item
         state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
@@ -838,6 +850,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleInstantPacingProbe() {
         InstantSwitchSettings.pacingProbeEnabled.toggle()
         instantPacingItem?.state = InstantSwitchSettings.pacingProbeEnabled ? .on : .off
+    }
+
+    @objc private func toggleMissionControlDirectSwitch() {
+        MissionControlDirectSettings.enabled.toggle()
+        directSwitchItem?.state = MissionControlDirectSettings.enabled ? .on : .off
+        // Save the existing instant and pacing preferences, just disable their
+        // menus while direct selection takes precedence.
+        instantSwitchItem?.isEnabled = !MissionControlDirectSettings.enabled
+        instantPacingItem?.isEnabled = !MissionControlDirectSettings.enabled
     }
 
     @objc private func changeShortcut(_ sender: NSMenuItem) {
