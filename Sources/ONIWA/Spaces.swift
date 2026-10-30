@@ -320,6 +320,40 @@ final class SpaceSwitcher {
             return .success(())
         }
 
+        if MissionControlDirectSettings.enabled {
+            SpaceSwitchDiagnostics.record(
+                "mc-direct selected target=\(target.systemID)"
+                + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))")
+            switch MissionControlDirectSwitch.press(
+                target: target, reader: reader, original: initialDisplays) {
+            case .failure(let error):
+                return .failure(error)
+            case .success:
+                // AXPress initiates the transition, not its completion.
+                // Validate the settled Space UUID/ID and every other screen.
+                switch verifySettledTarget(target, reader: reader) {
+                case .failure(let error):
+                    return .failure(error)
+                case .success:
+                    let after = reader.displays(includeAppNames: false)
+                    let previousOthers = initialDisplays.filter { $0.id != target.displayID }
+                    guard previousOthers.allSatisfy({ previous in
+                        guard let current = after.first(where: { $0.id == previous.id })
+                        else { return false }
+                        return current.currentID == previous.currentID
+                    }) else {
+                        SpaceSwitchDiagnostics.record(
+                            "mc-direct FAILED: another display changed")
+                        return .failure(SwitchFailure(
+                            "Mission Control直接移動中に別モニターのSpaceも変わりました。"
+                            + "追加操作は行いません。"))
+                    }
+                    SpaceSwitchDiagnostics.record("mc-direct confirmed target=\(target.systemID)")
+                    return .success(())
+                }
+            }
+        }
+
         guard let displayBounds = reader.displayBounds(for: target.displayID) else {
             return .failure(SwitchFailure(
                 "移動先のモニターを識別できません。画面構成を確認してください。"))
