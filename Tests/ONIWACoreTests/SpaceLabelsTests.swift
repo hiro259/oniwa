@@ -160,6 +160,59 @@ final class SpaceLabelsTests: XCTestCase {
         XCTAssertNil(store.label(for: second))
     }
 
+    func testStructuredTagsPreserveSpacesAfterRelaunch() {
+        let identity = space()
+        let store = SpaceLabelStore(defaults: defaults)
+        store.update(identity, name: "開発", tags: ["web development", "Slack", "ONIWA dev"])
+        XCTAssertEqual(store.label(for: identity)?.searchTags,
+                       ["web development", "Slack", "ONIWA dev"])
+        let reopened = SpaceLabelStore(defaults: defaults)
+        XCTAssertEqual(reopened.label(for: identity)?.searchTags,
+                       ["web development", "Slack", "ONIWA dev"])
+        XCTAssertEqual(reopened.label(for: identity)?.aliases, "")
+    }
+
+    func testStructuredTagEditsAndDeletingLastTag() {
+        let identity = space()
+        let store = SpaceLabelStore(defaults: defaults)
+        store.update(identity, name: "", tags: ["web dev", "slack"])
+        store.update(identity, name: "", tags: ["web development", "slack"])
+        XCTAssertEqual(store.label(for: identity)?.searchTags, ["web development", "slack"])
+        store.update(identity, name: "", tags: [])
+        XCTAssertNil(store.label(for: identity))
+        XCTAssertNil(SpaceLabelStore(defaults: defaults).label(for: identity))
+    }
+
+    func testLegacyAliasesLoadAndConvertToStructuredTagsOnEdit() {
+        let identity = space()
+        let old = SpaceLabel(name: "趣味", aliases: "shumi chrome")
+        let key = try! XCTUnwrap(identity.persistentKey)
+        defaults.set(try! JSONEncoder().encode([key: old]),
+                     forKey: "oniwa.customLabels.v2")
+        let store = SpaceLabelStore(defaults: defaults)
+        XCTAssertEqual(store.label(for: identity)?.searchTags, ["shumi", "chrome"])
+        XCTAssertNil(store.label(for: identity)?.tags)
+        store.update(identity, name: "趣味", tags: ["shumi", "Google Chrome"])
+        let reopened = SpaceLabelStore(defaults: defaults)
+        XCTAssertEqual(reopened.label(for: identity)?.searchTags,
+                       ["shumi", "Google Chrome"])
+        XCTAssertEqual(reopened.label(for: identity)?.tags, ["shumi", "Google Chrome"])
+    }
+
+    func testManualTagCleaningKeepsInteriorWhitespaceAndDeduplicates() {
+        XCTAssertEqual(SpaceLabel.cleanedTags([
+            "  #web dev  ", "WEB DEV", "  ＃Slack  ", "  ", "ONIWA project"
+        ]), ["web dev", "Slack", "ONIWA project"])
+    }
+
+    func testStructuredTagsRemainSessionOnlyWithoutSpaceUUID() {
+        let identity = space("builtin", 7, nil)
+        let store = SpaceLabelStore(defaults: defaults)
+        store.update(identity, name: "", tags: ["My Project"])
+        XCTAssertEqual(store.label(for: identity)?.searchTags, ["My Project"])
+        XCTAssertNil(SpaceLabelStore(defaults: defaults).label(for: identity))
+    }
+
     func testNormalizesEmptyUUIDToNilAndTrimsInput() {
         let identity = space("builtin", 1, "   ")
         XCTAssertNil(identity.persistentKey)
