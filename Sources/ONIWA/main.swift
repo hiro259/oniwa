@@ -357,30 +357,33 @@ struct SearchView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             ForEach(state.tagsDraft.indices, id: \.self) { index in
-                                HStack(spacing: 2) {
+                                // Both edit and delete controls belong to the
+                                // SAME pill. The X is intentionally inside its
+                                // right edge, not a floating control between tags.
+                                HStack(spacing: 5) {
                                     Button {
                                         state.beginTagEdit(at: index)
                                         isTagInputFocused = true
                                     } label: {
                                         Text("#" + state.tagsDraft[index])
                                             .lineLimit(1)
-                                            .padding(.leading, 8)
-                                            .padding(.vertical, 5)
                                     }
                                     .help("クリックしてタグを編集")
                                     Button {
                                         state.removeTag(at: index)
                                     } label: {
-                                        Image(systemName: "xmark")
+                                        Image(systemName: "xmark.circle.fill")
                                             .font(.caption2)
-                                            .padding(.trailing, 7)
-                                            .padding(.vertical, 5)
+                                            .foregroundStyle(.tertiary)
                                     }
-                                    .help("タグを削除")
+                                    .help("「\(state.tagsDraft[index])」を削除")
+                                    .accessibilityLabel("タグ「\(state.tagsDraft[index])」を削除")
                                 }
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                                 .buttonStyle(.plain)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
                                 .background(
                                     Color.secondary.opacity(state.editingTagIndex == index ? 0.20 : 0.10),
                                     in: Capsule()
