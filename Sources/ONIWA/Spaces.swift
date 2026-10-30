@@ -290,6 +290,16 @@ final class SpaceSwitcher {
         }
 
         let originalOrder = initial.spaces.map(\.systemID)
+        guard SpaceNavigation.layoutChange(from: originalOrder,
+                                           to: originalOrder) == .unchanged else {
+            return .failure(SwitchFailure("Space IDが重複しているため安全に切り替えられません。"))
+        }
+        // Keep a fixed identity roster; ONLY order changes may be followed.
+        // A recreated/reassigned Space or a changed monitor still aborts.
+        let initialSpaces = initial.spaces
+        var lastObservedOrder = originalOrder
+        var visitedLayouts = Set<String>()
+        let maxSteps = originalOrder.count * 2 + 2
         SpaceSwitchDiagnostics.record(
             "target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
             + "initial=\(initial.currentID.map(String.init) ?? "unknown") "
@@ -317,11 +327,11 @@ final class SpaceSwitcher {
                 "対象モニターへのカーソル移動を確認できません。安全のため停止しました。"))
         }
 
-        // Each successful step must land on precisely the neighboring Space.
-        // Re-read both the ordering and the active Space before the next step.
-        // We intentionally do not chase an arbitrary new position if the user
-        // changes Spaces or the system rearranges the layout during navigation.
-        for _ in 0..<originalOrder.count {
+        // Each successful step must reach the immediate neighbor. After that,
+        // reread the live layout. macOS may reorder the SAME Spaces between
+        // two confirmed steps: replan on that new order rather than aborting.
+        // Never follow an added/deleted/recreated Space or an unrelated display.
+        for stepIndex in 0..<maxSteps {
             let layout = reader.displays(includeAppNames: false)
             guard let live = layout.first(where: { $0.id == target.displayID }) else {
                 return .failure(SwitchFailure("対象モニターが接続解除されました。"))
@@ -339,15 +349,40 @@ final class SpaceSwitcher {
                 return .failure(SwitchFailure(
                     "対象のSpaceの識別子が変わったため、安全のため中断しました。"))
             }
-            guard order == originalOrder else {
+            switch SpaceNavigation.layoutChange(from: originalOrder, to: order) {
+            case .membershipChanged:
                 SpaceSwitchDiagnostics.record(
-                    "order-changed target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
+                    "layout-membership-changed target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
                     + " original=\(originalOrder) now=\(order)")
                 return .failure(SwitchFailure(
-                    "移動中にSpaceの順序が変わりました。安全のため中断しました。"))
+                    "移動中にSpaceが追加・削除・再作成されました。安全のため中断しました。"))
+            case .unchanged, .reordered:
+                // Even with the same numeric IDs, confirm UUID/display
+                // identity for EVERY Space before accepting a reordering.
+                let sameIdentities = live.spaces.allSatisfy { space in
+                    initialSpaces.contains(where: { $0.identity == space.identity })
+                }
+                guard sameIdentities else {
+                    SpaceSwitchDiagnostics.record(
+                        "layout-identity-changed target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))")
+                    return .failure(SwitchFailure(
+                        "移動中にSpace UUIDが変化しました。安全のため中断しました。"))
+                }
+                if order != lastObservedOrder {
+                    SpaceSwitchDiagnostics.record(
+                        "order-replanned target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
+                        + " step=\(stepIndex) old=\(lastObservedOrder) now=\(order)")
+                    lastObservedOrder = order
+                }
             }
             guard let current = live.currentID else {
                 return .failure(SwitchFailure("現在のSpaceを確認できなくなりました。"))
+            }
+            let stateKey = "\(current)|\(order.map(String.init).joined(separator: ","))"
+            guard visitedLayouts.insert(stateKey).inserted else {
+                SpaceSwitchDiagnostics.record("repeated-state target=\(target.systemID) state=\(stateKey)")
+                return .failure(SwitchFailure(
+                    "Spaceの並び替えが繰り返されたため、誤移動を防ぐため停止しました。"))
             }
             let decision: SpaceNavigation.Decision
             do {
@@ -429,7 +464,9 @@ final class SpaceSwitcher {
                         switch InstantSwitchPolicy.fallbackDecision(
                             previous: current, expected: nextSpaceID,
                             observed: latest.currentID,
-                            orderUnchanged: latest.spaces.map(\.systemID) == originalOrder
+                            orderUnchanged: SpaceNavigation.layoutChange(
+                                from: order, to: latest.spaces.map(\.systemID))
+                                != .membershipChanged
                         ) {
                         case .alreadySwitched:
                             continue
@@ -512,9 +549,13 @@ final class SpaceSwitcher {
             }
         }
 
-        // If the system never acknowledged arrival, never report success.
+        // A finite budget prevents loops if macOS continuously reorders the
+        // desktops. The last observed UUID/ID is never mistaken for success.
+        SpaceSwitchDiagnostics.record(
+            "step-limit target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
+            + " expected=\(target.systemID) limit=\(maxSteps)")
         return .failure(SwitchFailure(
-            "Spaceの切り替えを完了できませんでした。"))
+            "Spaceの並び替えが続き、安全な移動回数の上限に達しました。"))
     }
 
     /// The read-only Current Space ID may update ahead of the visible desktop.
