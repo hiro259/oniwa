@@ -64,6 +64,11 @@ final class SearchState: ObservableObject {
         return name.isEmpty ? space.defaultName : name
     }
 
+    func monitorName(_ space: SpaceEntry) -> String {
+        let number = (groups.firstIndex(where: { $0.id == space.displayID }) ?? 0) + 1
+        return "モニター\(number)（\(space.displayName)）"
+    }
+
     func resolvedSpaces(for pair: SpacePair) -> (SpaceEntry, SpaceEntry)? {
         guard let identities = SpacePairResolver.resolve(pair, in: all.map(\.identity)),
               let first = all.first(where: { $0.identity == identities.0 }),
@@ -176,6 +181,7 @@ final class SearchState: ObservableObject {
         guard pairStore.save(pair) else { return }
         pairRevision += 1
         pairEditing = false
+        query = ""
         selectedID = pairResultID(pair)
     }
 
@@ -420,7 +426,7 @@ struct SearchView: View {
                                     }
                                 }
                                 if let (first, second) = destination {
-                                    Text("\(first.displayName): \(state.spaceName(first))  +  \(second.displayName): \(state.spaceName(second))")
+                                    Text("\(state.monitorName(first)): \(state.spaceName(first))  +  \(state.monitorName(second)): \(state.spaceName(second))")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
@@ -678,7 +684,7 @@ struct SearchView: View {
                 TextField("セット名（例：ONIWA開発）", text: $state.pairNameDraft)
                 Picker("1つ目のモニター", selection: $state.pairFirstKey) {
                     ForEach(state.pairEligibleSpaces) { space in
-                        Text("\(space.displayName) · \(state.spaceName(space)) · Space \(space.index + 1)")
+                        Text("\(state.monitorName(space)) · \(state.spaceName(space)) · Space \(space.index + 1)")
                             .tag(space.identity.persistentKey ?? "")
                     }
                 }
@@ -687,7 +693,7 @@ struct SearchView: View {
                 }
                 Picker("2つ目のモニター", selection: $state.pairSecondKey) {
                     ForEach(state.pairSecondChoices) { space in
-                        Text("\(space.displayName) · \(state.spaceName(space)) · Space \(space.index + 1)")
+                        Text("\(state.monitorName(space)) · \(state.spaceName(space)) · Space \(space.index + 1)")
                             .tag(space.identity.persistentKey ?? "")
                     }
                 }
