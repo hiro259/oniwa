@@ -157,8 +157,14 @@ final class SpaceSwitcher {
 
     private func performPairSwitch(_ pair: SpacePair) -> Result<Void, Error> {
         let reader = SpaceReader.shared
-        SpaceSwitchDiagnostics.record("pair start id=\(pair.id)")
         let before = reader.displays(includeAppNames: false)
+        SpaceSwitchDiagnostics.record(
+            "pair start id=\(pair.id) "
+            + "first=\(SpaceSwitchDiagnostics.shortDisplay(pair.first.displayID)):"
+            + "\(String(pair.first.uuid.prefix(8))) "
+            + "second=\(SpaceSwitchDiagnostics.shortDisplay(pair.second.displayID)):"
+            + "\(String(pair.second.uuid.prefix(8)))")
+        SpaceSwitchDiagnostics.record("pair initial \(traceLayout(before))")
         guard let resolved = SpacePairResolver.resolve(
             pair, in: before.flatMap(\.spaces).map(\.identity)),
               let first = before.flatMap(\.spaces).first(where: { $0.identity == resolved.0 })
@@ -176,6 +182,7 @@ final class SpaceSwitcher {
 
         switch performSwitch(first) {
         case .failure(let error):
+            SpaceSwitchDiagnostics.record("pair first failed \(error.localizedDescription)")
             return .failure(SwitchFailure(
                 "セットの1つ目（\(first.displayName)）に切り替えられませんでした。"
                 + "2つ目は操作していません。\(error.localizedDescription)"))
@@ -186,6 +193,7 @@ final class SpaceSwitcher {
         // Always read a fresh layout. Do not reuse the second Space's numeric
         // ID blindly after the first monitor's transition.
         let middle = reader.displays(includeAppNames: false)
+        SpaceSwitchDiagnostics.record("pair after-first \(traceLayout(middle))")
         guard let livePair = SpacePairResolver.resolve(
             pair, in: middle.flatMap(\.spaces).map(\.identity)),
               let secondDisplay = middle.first(where: { $0.id == pair.second.displayID }),
@@ -198,8 +206,16 @@ final class SpaceSwitcher {
                 + "2つ目は操作せず中断しました。"))
         }
 
+        if secondDisplay.currentID == second.systemID {
+            SpaceSwitchDiagnostics.record(
+                "pair second skipped: already current display="
+                + "\(SpaceSwitchDiagnostics.shortDisplay(second.displayID))"
+                + " space=\(second.systemID)"
+                + " uuid=\(String(second.identity.uuid?.prefix(8) ?? "unknown"))")
+        }
         switch performSwitch(second) {
         case .failure(let error):
+            SpaceSwitchDiagnostics.record("pair second failed \(error.localizedDescription)")
             return .failure(SwitchFailure(
                 "1つ目（\(first.displayName)）は到達済みですが、"
                 + "2つ目（\(second.displayName)）は切り替えに失敗しました。"
@@ -209,6 +225,7 @@ final class SpaceSwitcher {
         }
 
         let after = reader.displays(includeAppNames: false)
+        SpaceSwitchDiagnostics.record("pair after-second \(traceLayout(after))")
         guard let finalPair = SpacePairResolver.resolve(
             pair, in: after.flatMap(\.spaces).map(\.identity)),
               after.first(where: { $0.id == pair.first.displayID })?.currentID
@@ -223,7 +240,41 @@ final class SpaceSwitcher {
                 "セット切り替え後に表示中のSpaceが想定と異なります。"
                 + "他の画面も確認してください。追加操作は行いません。"))
         }
+        // A reported currentID can lead the visible desktop transition.
+        // Observe the full layout again after the UI has had time to settle.
+        // This does not prove app windows are visible, but detects delayed
+        // reordering and delayed Space changes missed by the first sample.
+        Thread.sleep(forTimeInterval: 0.35)
+        let settled = reader.displays(includeAppNames: false)
+        SpaceSwitchDiagnostics.record("pair settled \(traceLayout(settled))")
+        guard let stablePair = SpacePairResolver.resolve(
+            pair, in: settled.flatMap(\.spaces).map(\.identity)),
+              settled.first(where: { $0.id == pair.first.displayID })?.currentID
+                == stablePair.0.managedID,
+              settled.first(where: { $0.id == pair.second.displayID })?.currentID
+                == stablePair.1.managedID,
+              untouched.allSatisfy({ id, oldSpace in
+                  settled.first(where: { $0.id == id })?.currentID == oldSpace
+              })
+        else {
+            SpaceSwitchDiagnostics.record("pair delayed mismatch: after-second IDs did not stay stable")
+            return .failure(SwitchFailure(
+                "セット移動直後は目標Spaceでしたが、表示の安定待ち中に"
+                + "別のSpaceへ変わりました。診断ログを確認してください。"))
+        }
+        SpaceSwitchDiagnostics.record("pair complete confirmed")
         return .success(())
+    }
+
+    private func traceLayout(_ groups: [DisplayGroup]) -> String {
+        groups.map { display in
+            let current = display.currentID.map(String.init) ?? "unknown"
+            let uuid = display.spaces.first(where: { $0.systemID == display.currentID })?
+                .identity.uuid.map { String($0.prefix(8)) } ?? "unknown"
+            let order = display.spaces.map(\.systemID)
+            return "\(SpaceSwitchDiagnostics.shortDisplay(display.id)){current:"
+                + "\(current),uuid:\(uuid),order:\(order)}"
+        }.joined(separator: " ")
     }
 
     private func performSwitch(_ target: SpaceEntry) -> Result<Void, Error> {
@@ -282,6 +333,9 @@ final class SpaceSwitcher {
                     "対象のSpaceの識別子が変わったため、安全のため中断しました。"))
             }
             guard order == originalOrder else {
+                SpaceSwitchDiagnostics.record(
+                    "order-changed target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
+                    + " original=\(originalOrder) now=\(order)")
                 return .failure(SwitchFailure(
                     "移動中にSpaceの順序が変わりました。安全のため中断しました。"))
             }
