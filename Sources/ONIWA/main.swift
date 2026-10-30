@@ -234,15 +234,26 @@ final class SearchState: ObservableObject {
     }
 
     func activateSelected() {
+        // A stale keyboard selection must NEVER silently activate the first
+        // search result. The first result could be a completely different
+        // Space (or a pair) after a refresh or a changing query.
+        guard let selectedID else {
+            SpaceSwitchDiagnostics.record("ui-activate aborted: no selected result")
+            return
+        }
         if let pair = pairResults.first(where: { pairResultID($0) == selectedID }) {
             activatePair(pair)
-        } else if let selected = results.first(where: { $0.id == selectedID }) {
-            activate(selected)
-        } else if let pair = pairResults.first {
-            activatePair(pair)
-        } else if let space = results.first {
+        } else if let space = results.first(where: { $0.id == selectedID }) {
             activate(space)
+        } else {
+            SpaceSwitchDiagnostics.record("ui-activate aborted: stale selected result")
+            errorMessage = "選択したSpaceが検索結果から消えました。候補を選び直してください。"
+            selectedIDReset()
         }
+    }
+
+    private func selectedIDReset() {
+        selectedID = allResultIDs.first
     }
 
     func beginEdit(_ space: SpaceEntry) {
