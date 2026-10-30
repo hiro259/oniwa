@@ -3,15 +3,23 @@
 Free, open-source macOS Spaces switcher with custom names and fuzzy search.
 ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual desktop engine.
 
-**Status: early prototype ([PR #2](https://github.com/hiro259/oniwa/pull/2), related to Issue #1).** The search UI, custom shortcut recorder and at least one Space switch have worked on a real Mac. The revised Core Graphics switch method and multi-monitor behavior still need hands-on verification.
+**Status: working prototype on `main` (Issue #1).** Search, names, shortcut handling, instant Space switching and switching between two displays have been verified on a real Mac. Sidecar, display reconnection and more complex fullscreen cases still need additional checks.
 
 ## First prototype
 
 - **New installations:** `⌥ Option + Space` opens the search palette by default. Existing installations retain their previously selected shortcut until changed. The menu-bar **庭** remains the fallback if a combination is intercepted by macOS.
 - Finds native desktops and fullscreen Spaces grouped by display.
 - The **currently visible Space** on each display has a subtle neutral outline and **✓ current** badge; the accent-colored row background separately indicates the keyboard-selected result.
-- Set a display name and search aliases (e.g. `shumi chrome`) by clicking the pencil.
+- Set a display name and search keywords (aliases) by clicking the pencil. Existing saved aliases are preserved; keywords can be separated with spaces, commas or `#` (e.g. `shumi chrome`, `#shumi #chrome`, `shumi,chrome`).
 - Partial, prefix and subsequence search. **While typing in the search field**, ↑ / ↓ select results, Enter switches to the highlighted Space, and Esc closes ONIWA. The key event router leaves active IME composition alone.
+### Search keywords and ranking (Issue #4, first pass)
+
+- User-defined names and explicit search keywords rank ahead of matches found in app names or monitor names **when match quality is equal**. Exact matches rank ahead of prefix, word-start, substring and subsequence matches.
+- Query terms may match **across fields**: a saved keyword `shumi` and running app `Google Chrome` match `shumi chrome` or `#shumi #chrome`. Matching is local; no API calls.
+- `shumi` → `趣味`, `kai` → `開発` and `hp` → `ホームページ制作` work **when you manually register** `shumi`, `kai` and `hp` as search keywords on those Spaces. Automatic conversion from kanji to romaji is **not implemented**. This is deliberate until a reliable local conversion approach is chosen.
+- The search UI still selects a **single Space**. Saved keywords are not separate selectable items. A `#` prefix is optional; it is not a tag-only filter.
+- On an empty query results retain their existing order; a query containing only tag separators does not accidentally select an arbitrary Space.
+
 - Labels are local UserDefaults data. No analytics or network requests.
 - Space discovery uses private **read-only** SkyLight symbols. Switching posts the standard `Ctrl+← / →` shortcut through Core Graphics with a **HID-system-state event source**, explicit Control-key down/up, and the arrow-key Fn/NumericPad flags required on some macOS versions (not AppleScript/System Events). It now confirms **each neighboring Space** before continuing; it stops on unexpected movement, disappearing Spaces, or reordering.
 
@@ -44,7 +52,8 @@ Requires macOS 13+, Apple developer command line tools or Xcode.
 ```fish
 cd ~/myfile/oniwa
 git fetch origin
-git switch feat/spaces-search-foundation
+git switch main
+git pull --ff-only origin main
 swift test
 sh build.sh
 open build/ONIWA.app
