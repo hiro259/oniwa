@@ -759,6 +759,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var keyboardMonitor: Any?
     private var instantSwitchItem: NSMenuItem?
+    private var instantPacingItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -800,6 +801,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         instant.target = self
         instantSwitchItem = instant
         menu.addItem(instant)
+        let pacing = NSMenuItem(title: "瞬時切り替え・間隔テスト（450ms）",
+                                action: #selector(toggleInstantPacingProbe),
+                                keyEquivalent: "")
+        pacing.toolTip = "高速ジェスチャー間に450msの確認待ちを挿入します。切り替え不具合の切り分け専用です。"
+        pacing.state = InstantSwitchSettings.pacingProbeEnabled ? .on : .off
+        pacing.target = self
+        instantPacingItem = pacing
+        menu.addItem(pacing)
         let diagnosis = NSMenuItem(title: "ショートカット診断…",
                                    action: #selector(showShortcutDiagnosis),
                                    keyEquivalent: "")
@@ -822,6 +831,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func toggleInstantSwitch() {
         InstantSwitchSettings.enabled.toggle()
         instantSwitchItem?.state = InstantSwitchSettings.enabled ? .on : .off
+    }
+
+    @objc private func toggleInstantPacingProbe() {
+        InstantSwitchSettings.pacingProbeEnabled.toggle()
+        instantPacingItem?.state = InstantSwitchSettings.pacingProbeEnabled ? .on : .off
     }
 
     @objc private func changeShortcut(_ sender: NSMenuItem) {
