@@ -11,10 +11,9 @@ enum SpaceSwitchDiagnostics {
     /// Prevent line breaks, terminal control characters and unbounded labels
     /// from introducing forged log entries or bloating the trace.
     static func safe(_ text: String) -> String {
-        String(text.prefix(100)).map { char in
-            char.isNewline || char.isASCII && char.asciiValue.map { $0 < 32 || $0 == 127 } == true
-                ? " " : char
-        }.reduce(into: "") { $0.append($1) }
+        text.unicodeScalars.prefix(100).map { scalar in
+            CharacterSet.controlCharacters.contains(scalar) ? " " : String(scalar)
+        }.joined()
     }
 
     static let logURL: URL = {
