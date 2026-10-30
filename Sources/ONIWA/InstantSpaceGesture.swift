@@ -206,4 +206,12 @@ enum InstantSwitchSettings {
         get { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: key) }
     }
+
+    // Diagnostic A/B control. Default OFF: no effect on normal instant switching.
+    // When ON, each confirmed fast step is held for 450ms and rechecked.
+    static let pacingProbeKey = "oniwa.instantPacingProbeEnabled"
+    static var pacingProbeEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: pacingProbeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: pacingProbeKey) }
+    }
 }
