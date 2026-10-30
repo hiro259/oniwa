@@ -49,6 +49,26 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 
 Unit tests in `SpaceLabelsTests.swift` cover persistence, safe deletion, multi-monitor isolation, legacy migration, ambiguous UUIDs, and the no-UUID session-only fallback. Real-Mac tests are still needed for actual SkyLight UUID behavior.
 
+## Two-monitor Space sets (experimental, Issue #11)
+
+- In the ONIWA search palette, choose **セットを追加** to create a named set such as **ONIWA開発**.
+- Select one Space on monitor 1 (e.g. `Chrome Dev ONIWA`) and one Space on a **different** monitor (e.g. `Term ONIWA`), then save. Create as many sets as needed.
+- Sets appear alongside individual Space results and can be found by name, their member Space names, or member app names. The **same ↑/↓ → Enter** keyboard flow activates a set. Single-Space switching remains unchanged.
+- To change or delete a set, click its pencil button. A pair whose target Space was removed or whose monitor was disconnected remains visible with a warning so you can reconfigure or delete it.
+- Set targets use **display ID + Space UUID**, never Space number or window title. A Space without a UUID cannot be saved in a set (it cannot be reliably identified after relaunch). Pair data persists locally in UserDefaults, separate from individual Space labels.
+- Switching is **sequential and verified**: first monitor, then second. If a target is already visible it is skipped. The first monitor's target is rechecked before the second transition; final IDs on both monitors and unrelated displays are checked after switching.
+- A partially failed set displays the error and which step reached its target. ONIWA does **not** automatically roll back a successful first transition because a rollback could itself select an unintended Space.
+- Both the instant Space-switch path and the existing verified normal Control+Arrow fallback are reused. The private macOS SkyLight API is still only read.
+
+### Pair validation checklist (real Mac)
+
+1. Create **ONIWA開発** pairing `Chrome Dev ONIWA` on the first display and `Term ONIWA` on the second. Search its name and press Enter; confirm both displays arrive at their assigned Spaces.
+2. Keep one display on its target and switch again; only the other display should move.
+3. Edit a saved pair, change either destination, and verify persistence after quitting/relaunching ONIWA. Delete a pair and confirm normal Space labels are unaffected.
+4. Confirm the Space on any *unrelated* display remains unchanged.
+5. Rearrange Spaces, then rename individual Space labels; the set should still select the original UUID identities.
+6. Remove a target Space or disconnect its monitor; verify the pair reports unavailable and does not choose an arbitrary replacement. Recreate/reconnect and edit it explicitly.
+7. Test fullscreen Spaces and the instant-switch ON/OFF setting. Check that failure messages do not claim success after only one display moved.
 ## Build (macOS)
 
 Requires macOS 13+, Apple developer command line tools or Xcode.
