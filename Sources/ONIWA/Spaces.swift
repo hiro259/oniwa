@@ -464,9 +464,7 @@ final class SpaceSwitcher {
                         switch InstantSwitchPolicy.fallbackDecision(
                             previous: current, expected: nextSpaceID,
                             observed: latest.currentID,
-                            orderUnchanged: SpaceNavigation.layoutChange(
-                                from: order, to: latest.spaces.map(\.systemID))
-                                != .membershipChanged
+                            orderUnchanged: latest.spaces.map(\.systemID) == order
                         ) {
                         case .alreadySwitched:
                             continue
