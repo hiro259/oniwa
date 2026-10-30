@@ -48,6 +48,18 @@ public enum FuzzySearch {
         return parts.map(String.init).filter { seen.insert($0).inserted }
     }
 
+    /// App names are transient tags based on the currently open windows.
+    /// Never persist these as user keywords: a closed/moved app should disappear
+    /// from the Space's automatic tags on the next refresh.
+    public static func appTags(from appNames: [String],
+                               excluding manualKeywords: [String]) -> [String] {
+        var seen = Set(manualKeywords.map(normalized))
+        return appNames.filter { app in
+            let name = normalized(app)
+            return !name.isEmpty && seen.insert(name).inserted
+        }
+    }
+
     private static func isKeywordSeparator(_ character: Character) -> Bool {
         character.isWhitespace
             || character == "#" || character == "＃"
