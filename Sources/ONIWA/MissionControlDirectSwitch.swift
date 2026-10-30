@@ -72,6 +72,10 @@ enum MissionControlDirectSwitch {
         // Poll for readiness; do not assume a fixed animation duration.
         let deadline = ProcessInfo.processInfo.systemUptime + 2.5
         var lastReason = "AXツリーがまだ表示されていません"
+        // A matching AX subtree can appear before the Mission Control
+        // thumbnails accept AXPress. Hammerspoon waits ~300ms for UI readiness.
+        // Require the SAME verified list to remain ready before pressing.
+        var readySince: TimeInterval?
         while ProcessInfo.processInfo.systemUptime < deadline {
             let candidates = candidateDisplayLists()
             if !candidates.isEmpty {
@@ -99,10 +103,24 @@ enum MissionControlDirectSwitch {
                     guard buttons.count == currentGroup.spaces.count else {
                         lastReason = "サムネイル数が一致しません AX=\(buttons.count)"
                             + " SkyLight=\(currentGroup.spaces.count)"
+                        readySince = nil
                         // A partially constructed list may fill in shortly.
                         Thread.sleep(forTimeInterval: 0.06)
                         continue
                     }
+                    let now = ProcessInfo.processInfo.systemUptime
+                    if readySince == nil {
+                        readySince = now
+                        SpaceSwitchDiagnostics.record(
+                            "mc-direct list-ready count=\(buttons.count)"
+                            + " index=\(targetIndex)")
+                    }
+                    guard let firstReady = readySince, now - firstReady >= 0.30 else {
+                        Thread.sleep(forTimeInterval: 0.06)
+                        continue
+                    }
+                    SpaceSwitchDiagnostics.record(
+                        "mc-direct ax-stable t=\(Int((now - firstReady) * 1000))ms")
                     // Only press after the target index is proved by the live
                     // SkyLight roster and the exact thumbnail count.
                     let action = AXUIElementPerformAction(
@@ -120,6 +138,9 @@ enum MissionControlDirectSwitch {
                     return .success(())
                 }
                 lastReason = "対象ディスプレイのmc.displayが見つかりません"
+                readySince = nil
+            } else {
+                readySince = nil
             }
             Thread.sleep(forTimeInterval: 0.06)
         }
