@@ -244,7 +244,9 @@ final class SpaceSwitcher {
         // Observe the full layout again after the UI has had time to settle.
         // This does not prove app windows are visible, but detects delayed
         // reordering and delayed Space changes missed by the first sample.
-        Thread.sleep(forTimeInterval: 0.35)
+        // Dock can re-activate an off-Space window around 400 ms after
+        // a nominal arrival. A 350 ms sample can report false success.
+        Thread.sleep(forTimeInterval: 0.85)
         let settled = reader.displays(includeAppNames: false)
         SpaceSwitchDiagnostics.record("pair settled \(traceLayout(settled))")
         guard let stablePair = SpacePairResolver.resolve(
@@ -363,6 +365,7 @@ final class SpaceSwitcher {
                 SpaceSwitchDiagnostics.record(
                     "step target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
                     + "from=\(current) to=\(nextSpaceID) "
+                    + "direction=\(direction == .right ? "right" : "left") "
                     + "mode=\(InstantSwitchSettings.enabled ? "instant-first" : "keyboard")")
                 guard let cursor = CGEvent(source: nil)?.location,
                       displayBounds.contains(cursor) else {
@@ -520,7 +523,9 @@ final class SpaceSwitcher {
     /// an ID-confirmed switch cannot prove the selected label was correct.
     private func verifySettledTarget(_ target: SpaceEntry,
                                      reader: SpaceReader) -> Result<Void, Error> {
-        Thread.sleep(forTimeInterval: 0.30)
+        // Observe beyond the documented/reproduced ~400 ms late Dock yank;
+        // the SkyLight current ID can initially look correct.
+        Thread.sleep(forTimeInterval: 0.85)
         let live = reader.displays(includeAppNames: false)
         let targetDisplay = live.first(where: { $0.id == target.displayID })
         let actual = targetDisplay?.currentID
@@ -637,7 +642,10 @@ final class SpaceSwitcher {
             case .waiting:
                 break
             case .wrongTarget:
-                SpaceSwitchDiagnostics.record("wrong-target target=\(SpaceSwitchDiagnostics.shortDisplay(displayID))")
+                let actual = observed[displayID].map(String.init) ?? "missing"
+                SpaceSwitchDiagnostics.record(
+                    "WRONG-TARGET display=\(SpaceSwitchDiagnostics.shortDisplay(displayID)) "
+                    + "from=\(previous) expected=\(expected) actual=\(actual)")
                 return .wrongSpace
             case .otherDisplayChanged:
                 let changes = beforeOthers.map { key, previousID in
