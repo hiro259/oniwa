@@ -17,7 +17,10 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 - User-defined names and explicit search keywords rank ahead of matches found in app names or monitor names **when match quality is equal**. Exact matches rank ahead of prefix, word-start, substring and subsequence matches.
 - Query terms may match **across fields**: a saved keyword `shumi` and running app `Google Chrome` match `shumi chrome` or `#shumi #chrome`. Matching is local; no API calls.
 - `shumi` → `趣味`, `kai` → `開発` and `hp` → `ホームページ制作` work **when you manually register** `shumi`, `kai` and `hp` as search keywords on those Spaces. Automatic conversion from kanji to romaji is **not implemented**. This is deliberate until a reliable local conversion approach is chosen.
-- The search UI still selects a **single Space**. Saved keywords are not separate selectable items. A `#` prefix is optional; it is not a tag-only filter.
+- In the name editor, type a search word and press **Space**, comma or Enter to turn it into a removable manual tag. Manual tags are stored using the existing aliases field; pressing Save also commits a final word without a separator.
+- Open apps (for example, **Slack** or **Google Chrome**) appear as **automatic app tags** on their Space when an app window can be detected there. They already participate in searches; these tags are refreshed when the search palette opens and **are never saved as manual tags**. App names are marked with a small app icon; manual tags begin with `#`.
+- The results list shows a few chips per Space and `+N` if others are hidden, keeping the search palette compact.
+- The search UI still selects a **single Space**. Tags are not separate selectable items. A `#` prefix is optional; it is not a tag-only filter.
 - On an empty query results retain their existing order; a query containing only tag separators does not accidentally select an arbitrary Space.
 
 - Labels are local UserDefaults data. No analytics or network requests.
