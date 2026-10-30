@@ -307,6 +307,11 @@ final class SpaceSwitcher {
         guard let originalCurrentID = initial.currentID else {
             return .failure(SwitchFailure("現在表示中のSpaceを確認できません。"))
         }
+        // Trace notifications through the entire switch and a short tail
+        // afterwards, without changing the navigation or 450ms probe.
+        SpaceSwitchDiagnostics.beginWorkspaceTrace()
+        defer { SpaceSwitchDiagnostics.endWorkspaceTrace() }
+
         // No reason to manipulate the cursor when that desktop is already visible.
         if originalCurrentID == target.systemID {
             // A previously visible Space can still contain an app different
