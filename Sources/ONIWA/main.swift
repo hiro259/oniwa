@@ -108,11 +108,13 @@ final class SearchState: ObservableObject {
     /// avoid discarding text when users move between tags.
     func beginTagEdit(at index: Int) {
         guard tagsDraft.indices.contains(index) else { return }
-        if editingTagIndex == nil {
-            commitPendingKeyword()
-        }
-        editingTagIndex = index
-        keywordInput = tagsDraft[index]
+        let target = tagsDraft[index]
+        // Commit any unfinished tag (including a prior edit) before moving
+        // focus; preserve the target even if de-duplication changes indices.
+        commitPendingKeyword()
+        guard let liveIndex = tagsDraft.firstIndex(of: target) else { return }
+        editingTagIndex = liveIndex
+        keywordInput = tagsDraft[liveIndex]
     }
 
     /// The only typing delimiter is Return. Spaces remain inside one tag.
