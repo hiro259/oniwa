@@ -486,7 +486,8 @@ final class SpaceSwitcher {
         }
         move.post(tap: .cghidEventTap)
         Thread.sleep(forTimeInterval: 0.14)
-        let positioned = CGEvent(source: nil)?.location.map { bounds.contains($0) } ?? false
+        let finalPointer = CGEvent(source: nil)?.location
+        let positioned = finalPointer.map { bounds.contains($0) } ?? false
         SpaceSwitchDiagnostics.record(
             "cursor-target=\(SpaceSwitchDiagnostics.shortDisplay(displayID)) "
             + "mouseMoved=true positioned=\(positioned)")
