@@ -339,6 +339,15 @@ final class SearchState: ObservableObject {
 
     func activate(_ space: SpaceEntry) {
         guard !isSwitching else { return }
+        let shownName = SpaceSwitchDiagnostics.safe(spaceName(space))
+        let apps = space.appNames.prefix(4).map { SpaceSwitchDiagnostics.safe($0) }
+            .joined(separator: ",")
+        SpaceSwitchDiagnostics.record(
+            "ui-activate single name=\(shownName) "
+            + "display=\(SpaceSwitchDiagnostics.shortDisplay(space.displayID)) "
+            + "space=\(space.systemID) uuid=\(space.identity.uuid.map { String($0.prefix(8)) } ?? "none") "
+            + "apps=[\(apps)] selectedID=\(SpaceSwitchDiagnostics.safe(selectedID ?? "none"))"
+        )
         isSwitching = true
         hidePanel?()
         switcher.switchTo(space) { [weak self] outcome in
