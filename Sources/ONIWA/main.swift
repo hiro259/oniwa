@@ -11,7 +11,8 @@ final class SearchState: ObservableObject {
     @Published var selectedID: String?
     @Published var editing = false
     @Published var nameDraft = ""
-    @Published var aliasesDraft = ""
+    @Published var tagsDraft: [String] = []
+    @Published var editingTagIndex: Int?
     @Published var keywordInput = ""
     @Published var editingAppNames: [String] = []
     @Published var hasEditingLabel = false
@@ -37,8 +38,8 @@ final class SearchState: ObservableObject {
             if let name = label?.name, !name.isEmpty {
                 fields.append(SearchField(text: name, kind: .name))
             }
-            if let aliases = label?.aliases {
-                fields += FuzzySearch.keywords(in: aliases).map {
+            if let label {
+                fields += label.searchTags.map {
                     SearchField(text: $0, kind: .keyword)
                 }
             }
@@ -78,7 +79,8 @@ final class SearchState: ObservableObject {
         editingIdentity = space.identity
         let label = labels.label(for: space.identity)
         nameDraft = label?.name ?? ""
-        aliasesDraft = label?.aliases ?? ""
+        tagsDraft = label?.searchTags ?? []
+        editingTagIndex = nil
         keywordInput = ""
         editingAppNames = space.appNames
         hasEditingLabel = label != nil
@@ -101,30 +103,42 @@ final class SearchState: ObservableObject {
         return live.first(where: { $0 == editingIdentity })
     }
 
-    /// Space, commas and # separate manually entered tags. Keep the last
-    /// unfinished word in the input field so users can continue typing it.
-    func captureKeywordSeparators() {
-        guard let boundary = keywordInput.lastIndex(where: {
-            $0.isWhitespace || "#＃,，、;；".contains($0)
-        }) else { return }
-        let completed = String(keywordInput[...boundary])
-        let remaining = String(keywordInput[keywordInput.index(after: boundary)...])
-        aliasesDraft = FuzzySearch.keywords(in: aliasesDraft + " " + completed)
-            .joined(separator: " ")
-        keywordInput = remaining
+    /// Clicking a chip loads it into the text field; Enter commits the edit.
+    /// An unfinished new tag is committed before editing an existing one, to
+    /// avoid discarding text when users move between tags.
+    func beginTagEdit(at index: Int) {
+        guard tagsDraft.indices.contains(index) else { return }
+        if editingTagIndex == nil {
+            commitPendingKeyword()
+        }
+        editingTagIndex = index
+        keywordInput = tagsDraft[index]
     }
 
+    /// The only typing delimiter is Return. Spaces remain inside one tag.
     func commitPendingKeyword() {
-        aliasesDraft = FuzzySearch.keywords(in: aliasesDraft + " " + keywordInput)
-            .joined(separator: " ")
+        let input = SpaceLabel.cleanedTags([keywordInput]).first
+        if let index = editingTagIndex, tagsDraft.indices.contains(index) {
+            if let input { tagsDraft[index] = input }
+        } else if let input {
+            tagsDraft.append(input)
+        }
+        tagsDraft = SpaceLabel.cleanedTags(tagsDraft)
         keywordInput = ""
+        editingTagIndex = nil
     }
 
-    func removeKeyword(_ value: String) {
-        let normalized = FuzzySearch.normalized(value)
-        aliasesDraft = FuzzySearch.keywords(in: aliasesDraft)
-            .filter { FuzzySearch.normalized($0) != normalized }
-            .joined(separator: " ")
+    func removeTag(at index: Int) {
+        guard tagsDraft.indices.contains(index) else { return }
+        tagsDraft.remove(at: index)
+        if let editingTagIndex {
+            if editingTagIndex == index {
+                keywordInput = ""
+                self.editingTagIndex = nil
+            } else if editingTagIndex > index {
+                self.editingTagIndex = editingTagIndex - 1
+            }
+        }
     }
 
     func saveLabel() {
@@ -134,7 +148,7 @@ final class SearchState: ObservableObject {
             errorMessage = "編集中のSpaceが見つかりません。検索一覧を更新してください。"
             return
         }
-        labels.update(identity, name: nameDraft, aliases: aliasesDraft)
+        labels.update(identity, name: nameDraft, tags: tagsDraft)
         labelRevision += 1
         cancelEdit()
         if !results.contains(where: { $0.id == selectedID }) {
@@ -144,8 +158,9 @@ final class SearchState: ObservableObject {
 
     func deleteLabel() {
         nameDraft = ""
-        aliasesDraft = ""
+        tagsDraft = []
         keywordInput = ""
+        editingTagIndex = nil
         saveLabel()
     }
 
@@ -193,6 +208,7 @@ private struct SpaceTag: View {
 struct SearchView: View {
     @ObservedObject var state: SearchState
     @FocusState private var isSearchFocused: Bool
+    @FocusState private var isTagInputFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -240,8 +256,7 @@ struct SearchView: View {
                                     .lineLimit(1)
                                 // Saved search keywords and current apps appear
                                 // as tags, but only the manual tags are persisted.
-                                let manualTags = FuzzySearch.keywords(in:
-                                    state.labels.label(for: space.identity)?.aliases ?? "")
+                                let manualTags = state.labels.label(for: space.identity)?.searchTags ?? []
                                 let appTags = FuzzySearch.appTags(from: space.appNames,
                                                                  excluding: manualTags)
                                 if !manualTags.isEmpty || !appTags.isEmpty {
@@ -328,31 +343,51 @@ struct SearchView: View {
                 Text("Spaceの名前と検索タグ").font(.headline)
                 TextField("表示名（例：趣味）", text: $state.nameDraft)
                 Text("検索タグ").font(.subheadline.weight(.medium))
-                TextField("キーワードを入力し、Spaceで追加", text: $state.keywordInput)
-                    .onChange(of: state.keywordInput) { _ in
-                        state.captureKeywordSeparators()
+                TextField(state.editingTagIndex == nil
+                          ? "タグを入力してEnterで追加（スペースも使用可）"
+                          : "タグを編集してEnterで確定", text: $state.keywordInput)
+                    .focused($isTagInputFocused)
+                    .onSubmit {
+                        state.commitPendingKeyword()
+                        isTagInputFocused = true
                     }
-                    .onSubmit { state.commitPendingKeyword() }
-                let manualTags = FuzzySearch.keywords(in: state.aliasesDraft)
-                if !manualTags.isEmpty {
+                if !state.tagsDraft.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
-                            ForEach(manualTags, id: \.self) { tag in
-                                Button {
-                                    state.removeKeyword(tag)
-                                } label: {
-                                    HStack(spacing: 4) {
-                                        SpaceTag(title: tag, isAutomatic: false)
-                                        Image(systemName: "xmark").font(.caption2)
+                            ForEach(state.tagsDraft.indices, id: \.self) { index in
+                                HStack(spacing: 2) {
+                                    Button {
+                                        state.beginTagEdit(at: index)
+                                        isTagInputFocused = true
+                                    } label: {
+                                        Text("#" + state.tagsDraft[index])
+                                            .lineLimit(1)
+                                            .padding(.leading, 8)
+                                            .padding(.vertical, 5)
                                     }
+                                    .help("クリックしてタグを編集")
+                                    Button {
+                                        state.removeTag(at: index)
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.caption2)
+                                            .padding(.trailing, 7)
+                                            .padding(.vertical, 5)
+                                    }
+                                    .help("タグを削除")
                                 }
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                                 .buttonStyle(.plain)
-                                .help("検索タグを削除")
+                                .background(
+                                    Color.secondary.opacity(state.editingTagIndex == index ? 0.20 : 0.10),
+                                    in: Capsule()
+                                )
                             }
                         }
                     }
                 }
-                Text("Space・カンマでタグを区切れます。保存したタグだけが固定されます。")
+                Text("Enterで追加・確定。タグをクリックすると再編集、×で削除できます。")
                     .font(.caption).foregroundStyle(.secondary)
                 if !state.editingAppNames.isEmpty {
                     Text("開いているアプリ（自動タグ）")
@@ -360,7 +395,7 @@ struct SearchView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
                             ForEach(FuzzySearch.appTags(from: state.editingAppNames,
-                                                        excluding: manualTags), id: \.self) { app in
+                                                        excluding: state.tagsDraft), id: \.self) { app in
                                 SpaceTag(title: app, isAutomatic: true)
                             }
                         }
@@ -382,7 +417,6 @@ struct SearchView: View {
                     Spacer()
                     Button("キャンセル") { state.cancelEdit() }
                     Button("保存") { state.saveLabel() }
-                        .keyboardShortcut(.defaultAction)
                 }
             }
             .padding(20)
