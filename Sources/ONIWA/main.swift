@@ -197,6 +197,13 @@ final class SearchState: ObservableObject {
 
     func activatePair(_ pair: SpacePair) {
         guard !isSwitching else { return }
+        SpaceSwitchDiagnostics.record(
+            "ui-activate pair name=\(SpaceSwitchDiagnostics.safe(pair.name)) "
+            + "first=\(SpaceSwitchDiagnostics.shortDisplay(pair.first.displayID)):"
+            + "\(String(pair.first.uuid.prefix(8))) "
+            + "second=\(SpaceSwitchDiagnostics.shortDisplay(pair.second.displayID)):"
+            + "\(String(pair.second.uuid.prefix(8)))"
+        )
         guard resolvedSpaces(for: pair) != nil else {
             errorMessage = "セットのSpaceが見つかりません。鉛筆ボタンから再設定してください。"
             return
