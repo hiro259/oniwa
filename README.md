@@ -60,6 +60,21 @@ Unit tests in `SpaceLabelsTests.swift` cover persistence, safe deletion, multi-m
 - A partially failed set displays the error and which step reached its target. ONIWA does **not** automatically roll back a successful first transition because a rollback could itself select an unintended Space.
 - Both the instant Space-switch path and the existing verified normal Control+Arrow fallback are reused. The private macOS SkyLight API is still only read.
 
+### Switching target diagnostics (2026-10-30)
+
+**Observed user symptom:** Some pair switches reach the requested Spaces, others move an unexpected monitor or fail. The exact affected OS state has not yet been reproduced in a Mac debugger.
+
+**Likely bug in the previous implementation:** `CGWarpMouseCursorPosition` moves the cursor but does not generate a `mouseMoved` event (Apple-documented behavior). Dock and Mission Control can therefore still route a synthetic swipe/Control+Arrow to a previously active display. Previous verification polled only the requested display, missing a wrong-monitor transition until the end of the set.
+
+**Mitigations:** ONIWA now posts a genuine, button-free mouseMoved after repositioning, checks that the pointer is on the requested display, samples all displays **after each gesture/key step** and aborts on any unrelated display change. Never send a fallback key after an unexpected change. A user moving the pointer to another monitor also aborts the pending keyboard fallback.
+
+**Local diagnostic log:** `~/Library/Logs/ONIWA/switch.log` (rotated, capped at 256 KB). Use menu bar **庭 → 切り替え診断ログを開く…**, or in fish:
+
+```fish
+tail -n 80 ~/Library/Logs/ONIWA/switch.log
+```
+
+Trace lines include Space numeric IDs, shortened display IDs, intended step, actual confirmation, and `WRONG-DISPLAY` / timeout. They do not include typed search terms, app names or window titles and are never uploaded. For a controlled comparison, repeat the same pair with **庭 → 瞬時切り替え（試験的）** ON and OFF, recording which mode fails. This is diagnostic evidence, not a guarantee that all OS-level routing bugs are fixed.
 ### Pair validation checklist (real Mac)
 
 1. Create **ONIWA開発** pairing `Chrome Dev ONIWA` on the first display and `Term ONIWA` on the second. Search its name and press Enter; confirm both displays arrive at their assigned Spaces.
