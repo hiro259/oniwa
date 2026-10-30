@@ -167,12 +167,11 @@ final class SpaceSwitcher {
         }
 
         // Snapshot unrelated displays so we can detect an unintended change.
-        let untouched = Dictionary(uniqueKeysWithValues: before
-            .filter { $0.id != pair.first.displayID && $0.id != pair.second.displayID }
-            .compactMap { group -> (String, UInt64)? in
-                guard let current = group.currentID else { return nil }
-                return (group.id, current)
-            })
+        var untouched: [String: UInt64] = [:]
+        for display in before
+            where display.id != pair.first.displayID && display.id != pair.second.displayID {
+            if let current = display.currentID { untouched[display.id] = current }
+        }
 
         switch performSwitch(first) {
         case .failure(let error):
@@ -230,7 +229,7 @@ final class SpaceSwitcher {
         let reader = SpaceReader.shared
         let initialDisplays = reader.displays(includeAppNames: false)
         guard let initial = initialDisplays.first(where: { $0.id == target.displayID }),
-              initial.spaces.contains(where: { $0.systemID == target.systemID })
+              initial.spaces.contains(where: { $0.identity == target.identity })
         else {
             return .failure(SwitchFailure(
                 "選択したSpaceが見つかりません。検索パネルを更新してください。"))
@@ -271,6 +270,10 @@ final class SpaceSwitcher {
                 return .failure(SwitchFailure("対象モニターが接続解除されました。"))
             }
             let order = live.spaces.map(\.systemID)
+            guard live.spaces.contains(where: { $0.identity == target.identity }) else {
+                return .failure(SwitchFailure(
+                    "対象のSpaceの識別子が変わったため、安全のため中断しました。"))
+            }
             guard order == originalOrder else {
                 return .failure(SwitchFailure(
                     "移動中にSpaceの順序が変わりました。安全のため中断しました。"))
