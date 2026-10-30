@@ -146,6 +146,86 @@ final class SpaceSwitcher {
         }
     }
 
+    /// The user requests two displays with a single action, but transitions
+    /// run sequentially on the same queue and are checked separately.
+    func switchToPair(_ pair: SpacePair, completion: @escaping (Result<Void, Error>) -> Void) {
+        queue.async {
+            let result = self.performPairSwitch(pair)
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    private func performPairSwitch(_ pair: SpacePair) -> Result<Void, Error> {
+        let reader = SpaceReader.shared
+        let before = reader.displays(includeAppNames: false)
+        guard let resolved = SpacePairResolver.resolve(
+            pair, in: before.flatMap(\.spaces).map(\.identity)),
+              let first = before.flatMap(\.spaces).first(where: { $0.identity == resolved.0 })
+        else {
+            return .failure(SwitchFailure(
+                "セット内のSpaceが見つかりません。別のSpaceに置き換えず、セットを編集してください。"))
+        }
+
+        // Snapshot unrelated displays so we can detect an unintended change.
+        let untouched = Dictionary(uniqueKeysWithValues: before
+            .filter { $0.id != pair.first.displayID && $0.id != pair.second.displayID }
+            .compactMap { group -> (String, UInt64)? in
+                guard let current = group.currentID else { return nil }
+                return (group.id, current)
+            })
+
+        switch performSwitch(first) {
+        case .failure(let error):
+            return .failure(SwitchFailure(
+                "セットの1つ目（\(first.displayName)）に切り替えられませんでした。"
+                + "2つ目は操作していません。\(error.localizedDescription)"))
+        case .success:
+            break
+        }
+
+        // Always read a fresh layout. Do not reuse the second Space's numeric
+        // ID blindly after the first monitor's transition.
+        let middle = reader.displays(includeAppNames: false)
+        guard let livePair = SpacePairResolver.resolve(
+            pair, in: middle.flatMap(\.spaces).map(\.identity)),
+              let secondDisplay = middle.first(where: { $0.id == pair.second.displayID }),
+              let second = secondDisplay.spaces.first(where: { $0.identity == livePair.1 }),
+              middle.first(where: { $0.id == pair.first.displayID })?.currentID
+                == livePair.0.managedID
+        else {
+            return .failure(SwitchFailure(
+                "1つ目のSpaceへの移動後に画面構成が変わりました。"
+                + "2つ目は操作せず中断しました。"))
+        }
+
+        switch performSwitch(second) {
+        case .failure(let error):
+            return .failure(SwitchFailure(
+                "1つ目（\(first.displayName)）は到達済みですが、"
+                + "2つ目（\(second.displayName)）は切り替えに失敗しました。"
+                + "自動的に元の状態には戻しません。\(error.localizedDescription)"))
+        case .success:
+            break
+        }
+
+        let after = reader.displays(includeAppNames: false)
+        guard let finalPair = SpacePairResolver.resolve(
+            pair, in: after.flatMap(\.spaces).map(\.identity)),
+              after.first(where: { $0.id == pair.first.displayID })?.currentID
+                == finalPair.0.managedID,
+              after.first(where: { $0.id == pair.second.displayID })?.currentID
+                == finalPair.1.managedID,
+              untouched.allSatisfy({ id, oldSpace in
+                  after.first(where: { $0.id == id })?.currentID == oldSpace
+              })
+        else {
+            return .failure(SwitchFailure(
+                "セット切り替え後に表示中のSpaceが想定と異なります。"
+                + "他の画面も確認してください。追加操作は行いません。"))
+        }
+        return .success(())
+    }
+
     private func performSwitch(_ target: SpaceEntry) -> Result<Void, Error> {
         let reader = SpaceReader.shared
         let initialDisplays = reader.displays(includeAppNames: false)
