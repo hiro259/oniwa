@@ -26,10 +26,22 @@ final class SearchState: ObservableObject {
     var all: [SpaceEntry] { groups.flatMap(\.spaces) }
     var results: [SpaceEntry] {
         _ = labelRevision
-        return FuzzySearch.sorted(all, query: query) { space in
+        return FuzzySearch.ranked(all, query: query) { space in
             let label = labels.label(for: space.identity)
-            return [label?.name ?? "", label?.aliases ?? "",
-                    space.defaultName, space.displayName] + space.appNames
+            var fields: [SearchField] = [
+                SearchField(text: space.defaultName, kind: .defaultName),
+                SearchField(text: space.displayName, kind: .display)
+            ]
+            if let name = label?.name, !name.isEmpty {
+                fields.append(SearchField(text: name, kind: .name))
+            }
+            if let aliases = label?.aliases {
+                fields += FuzzySearch.keywords(in: aliases).map {
+                    SearchField(text: $0, kind: .keyword)
+                }
+            }
+            fields += space.appNames.map { SearchField(text: $0, kind: .app) }
+            return fields
         }
     }
 
@@ -240,7 +252,7 @@ struct SearchView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Spaceの名前と検索用の別名").font(.headline)
                 TextField("表示名（例：趣味）", text: $state.nameDraft)
-                TextField("検索用の別名（例：shumi chrome）", text: $state.aliasesDraft)
+                TextField("検索キーワード（例：shumi #chrome #oniwa）", text: $state.aliasesDraft)
                 if state.editingIsSessionOnly {
                     Text("このSpaceには識別用UUIDがありません。誤ったSpaceへの名前引き継ぎを防ぐため、名前はONIWAを終了するまで有効です。")
                         .font(.caption)
