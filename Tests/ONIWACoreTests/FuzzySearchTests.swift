@@ -88,6 +88,18 @@ final class FuzzySearchTests: XCTestCase {
         XCTAssertTrue(FuzzySearch.ranked(items, query: "kai slack") { $0.fields }.isEmpty)
     }
 
+    func testAutomaticAppTagsAreDerivedNotStoredAndExcludeManualDuplicates() {
+        let manual = FuzzySearch.keywords(in: "#slack #oniwa")
+        XCTAssertEqual(FuzzySearch.appTags(
+            from: ["Google Chrome", "Slack", "Terminal", "Google Chrome"],
+            excluding: manual),
+            ["Google Chrome", "Terminal"])
+
+        // When a window closes or moves, the next snapshot no longer shows it.
+        XCTAssertEqual(FuzzySearch.appTags(from: ["Slack"], excluding: manual), [])
+        XCTAssertEqual(FuzzySearch.appTags(from: ["Finder"], excluding: manual), ["Finder"])
+    }
+
     func testEmptyQueryKeepsOriginalOrderAndOnlyTagMarkerMatchesNothing() {
         let items = [
             Candidate(id: "first", fields: [.init(text: "Alpha", kind: .name)]),
