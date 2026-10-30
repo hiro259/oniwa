@@ -329,8 +329,16 @@ final class SpaceSwitcher {
             case .failure(let error):
                 return .failure(error)
             case .success:
-                // AXPress initiates the transition, not its completion.
-                // Validate the settled Space UUID/ID and every other screen.
+                // AXPress acknowledges the button action, not Space arrival.
+                // macOS 27 may need over 850ms before the first ID change.
+                // Detect arrival independently, then verify the settled result.
+                switch waitForDirectArrival(target, reader: reader,
+                                            initial: initialDisplays) {
+                case .failure(let error):
+                    return .failure(error)
+                case .success:
+                    break
+                }
                 switch verifySettledTarget(target, reader: reader) {
                 case .failure(let error):
                     return .failure(error)
@@ -620,6 +628,65 @@ final class SpaceSwitcher {
             + " expected=\(target.systemID) limit=\(maxSteps)")
         return .failure(SwitchFailure(
             "Spaceの並び替えが続き、安全な移動回数の上限に達しました。"))
+    }
+
+
+    /// The Accessibility API reports that the button was pressed, but does not
+    /// acknowledge a completed Space transition. Wait for the *first* correct
+    /// current ID before starting the independent post-arrival settling check.
+    /// An unexpected target or change on a different display is a hard stop.
+    private func waitForDirectArrival(_ target: SpaceEntry, reader: SpaceReader,
+                                      initial: [DisplayGroup]) -> Result<Void, Error> {
+        let baseline = initial.first(where: { $0.id == target.displayID })?.currentID
+        let otherDisplays = initial.filter { $0.id != target.displayID }
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        let deadline = startedAt + 3.0
+        var lastCurrent: UInt64? = baseline
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            Thread.sleep(forTimeInterval: pollInterval)
+            let displays = reader.displays(includeAppNames: false)
+            guard let live = displays.first(where: { $0.id == target.displayID }),
+                  live.spaces.filter({ $0.identity == target.identity }).count == 1 else {
+                SpaceSwitchDiagnostics.record("mc-direct arrival: target display/UUID missing")
+                return .failure(SwitchFailure(
+                    "Mission Control移動中に対象Spaceの識別情報が変化しました。"))
+            }
+            guard otherDisplays.allSatisfy({ other in
+                displays.first(where: { $0.id == other.id })?.currentID == other.currentID
+            }) else {
+                SpaceSwitchDiagnostics.record("mc-direct arrival: other display changed")
+                return .failure(SwitchFailure(
+                    "Mission Control移動中に別モニターのSpaceが変わりました。"))
+            }
+            let current = live.currentID
+            if current != lastCurrent {
+                SpaceSwitchDiagnostics.record(
+                    "mc-direct arrival-change elapsed="
+                    + "\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))ms"
+                    + " previous=\(lastCurrent.map(String.init) ?? "unknown")"
+                    + " current=\(current.map(String.init) ?? "unknown")")
+                lastCurrent = current
+            }
+            if current == target.systemID {
+                SpaceSwitchDiagnostics.record(
+                    "mc-direct arrived target=\(target.systemID) latency="
+                    + "\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))ms")
+                return .success(())
+            }
+            if let current, current != baseline {
+                SpaceSwitchDiagnostics.record(
+                    "mc-direct wrong-arrival target=\(target.systemID) actual=\(current)")
+                return .failure(SwitchFailure(
+                    "Mission Controlが別のSpaceへ移動しました。"
+                    + "安全のため追加操作を行いません。"))
+            }
+        }
+        SpaceSwitchDiagnostics.record(
+            "mc-direct arrival-timeout target=\(target.systemID)"
+            + " actual=\(lastCurrent.map(String.init) ?? "unknown")")
+        return .failure(SwitchFailure(
+            "Mission Controlの操作後3秒以内に目的のSpaceへの移動を確認できませんでした。"
+            + "診断ログを確認してください。"))
     }
 
     /// The read-only Current Space ID may update ahead of the visible desktop.
