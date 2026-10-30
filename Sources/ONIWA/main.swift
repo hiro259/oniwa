@@ -11,7 +11,10 @@ final class SearchState: ObservableObject {
     @Published var selectedID: String?
     @Published var editing = false
     @Published var nameDraft = ""
-    @Published var aliasesDraft = ""
+    @Published var tagsDraft: [String] = []
+    @Published var editingTagIndex: Int?
+    @Published var keywordInput = ""
+    @Published var editingAppNames: [String] = []
     @Published var hasEditingLabel = false
     @Published var editingIsSessionOnly = false
     @Published var labelRevision = 0
@@ -26,10 +29,22 @@ final class SearchState: ObservableObject {
     var all: [SpaceEntry] { groups.flatMap(\.spaces) }
     var results: [SpaceEntry] {
         _ = labelRevision
-        return FuzzySearch.sorted(all, query: query) { space in
+        return FuzzySearch.ranked(all, query: query) { space in
             let label = labels.label(for: space.identity)
-            return [label?.name ?? "", label?.aliases ?? "",
-                    space.defaultName, space.displayName] + space.appNames
+            var fields: [SearchField] = [
+                SearchField(text: space.defaultName, kind: .defaultName),
+                SearchField(text: space.displayName, kind: .display)
+            ]
+            if let name = label?.name, !name.isEmpty {
+                fields.append(SearchField(text: name, kind: .name))
+            }
+            if let label {
+                fields += label.searchTags.map {
+                    SearchField(text: $0, kind: .keyword)
+                }
+            }
+            fields += space.appNames.map { SearchField(text: $0, kind: .app) }
+            return fields
         }
     }
 
@@ -64,7 +79,10 @@ final class SearchState: ObservableObject {
         editingIdentity = space.identity
         let label = labels.label(for: space.identity)
         nameDraft = label?.name ?? ""
-        aliasesDraft = label?.aliases ?? ""
+        tagsDraft = label?.searchTags ?? []
+        editingTagIndex = nil
+        keywordInput = ""
+        editingAppNames = space.appNames
         hasEditingLabel = label != nil
         editingIsSessionOnly = space.identity.persistentKey == nil
         editing = true
@@ -85,13 +103,54 @@ final class SearchState: ObservableObject {
         return live.first(where: { $0 == editingIdentity })
     }
 
+    /// Clicking a chip loads it into the text field; Enter commits the edit.
+    /// An unfinished new tag is committed before editing an existing one, to
+    /// avoid discarding text when users move between tags.
+    func beginTagEdit(at index: Int) {
+        guard tagsDraft.indices.contains(index) else { return }
+        let target = tagsDraft[index]
+        // Commit any unfinished tag (including a prior edit) before moving
+        // focus; preserve the target even if de-duplication changes indices.
+        commitPendingKeyword()
+        guard let liveIndex = tagsDraft.firstIndex(of: target) else { return }
+        editingTagIndex = liveIndex
+        keywordInput = tagsDraft[liveIndex]
+    }
+
+    /// The only typing delimiter is Return. Spaces remain inside one tag.
+    func commitPendingKeyword() {
+        let input = SpaceLabel.cleanedTags([keywordInput]).first
+        if let index = editingTagIndex, tagsDraft.indices.contains(index) {
+            if let input { tagsDraft[index] = input }
+        } else if let input {
+            tagsDraft.append(input)
+        }
+        tagsDraft = SpaceLabel.cleanedTags(tagsDraft)
+        keywordInput = ""
+        editingTagIndex = nil
+    }
+
+    func removeTag(at index: Int) {
+        guard tagsDraft.indices.contains(index) else { return }
+        tagsDraft.remove(at: index)
+        if let editingTagIndex {
+            if editingTagIndex == index {
+                keywordInput = ""
+                self.editingTagIndex = nil
+            } else if editingTagIndex > index {
+                self.editingTagIndex = editingTagIndex - 1
+            }
+        }
+    }
+
     func saveLabel() {
+        commitPendingKeyword()
         guard let identity = liveEditingIdentity() else {
             cancelEdit()
             errorMessage = "編集中のSpaceが見つかりません。検索一覧を更新してください。"
             return
         }
-        labels.update(identity, name: nameDraft, aliases: aliasesDraft)
+        labels.update(identity, name: nameDraft, tags: tagsDraft)
         labelRevision += 1
         cancelEdit()
         if !results.contains(where: { $0.id == selectedID }) {
@@ -101,7 +160,9 @@ final class SearchState: ObservableObject {
 
     func deleteLabel() {
         nameDraft = ""
-        aliasesDraft = ""
+        tagsDraft = []
+        keywordInput = ""
+        editingTagIndex = nil
         saveLabel()
     }
 
@@ -123,9 +184,33 @@ final class SearchState: ObservableObject {
     func showError() { showPanel?() }
 }
 
+/// Search keywords and transient app names deliberately use different chips.
+private struct SpaceTag: View {
+    let title: String
+    let isAutomatic: Bool
+
+    var body: some View {
+        HStack(spacing: 2) {
+            if isAutomatic {
+                Image(systemName: "app")
+            } else {
+                Text("#")
+            }
+            Text(title).lineLimit(1)
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Color.secondary.opacity(isAutomatic ? 0.06 : 0.11), in: Capsule())
+        .help(isAutomatic ? "このSpace内のアプリから自動取得（保存されません）" : "登録した検索タグ")
+    }
+}
+
 struct SearchView: View {
     @ObservedObject var state: SearchState
     @FocusState private var isSearchFocused: Bool
+    @FocusState private var isTagInputFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -168,12 +253,31 @@ struct SearchView: View {
                                             .help("このモニターで現在表示されているSpace")
                                     }
                                 }
-                                let alias = state.labels.label(for: space.identity)?.aliases ?? ""
-                                Text([space.displayName, "Space \(space.index + 1)",
-                                      space.appNames.joined(separator: ", "), alias]
-                                        .filter { !$0.isEmpty }.joined(separator: " · "))
+                                Text("\(space.displayName) · Space \(space.index + 1)")
                                     .font(.caption).foregroundStyle(.secondary)
                                     .lineLimit(1)
+                                // Saved search keywords and current apps appear
+                                // as tags, but only the manual tags are persisted.
+                                let manualTags = state.labels.label(for: space.identity)?.searchTags ?? []
+                                let appTags = FuzzySearch.appTags(from: space.appNames,
+                                                                 excluding: manualTags)
+                                if !manualTags.isEmpty || !appTags.isEmpty {
+                                    HStack(spacing: 4) {
+                                        ForEach(Array(manualTags.prefix(2)), id: \.self) { tag in
+                                            SpaceTag(title: tag, isAutomatic: false)
+                                        }
+                                        ForEach(Array(appTags.prefix(2)), id: \.self) { app in
+                                            SpaceTag(title: app, isAutomatic: true)
+                                        }
+                                        let extra = max(0, manualTags.count - 2)
+                                            + max(0, appTags.count - 2)
+                                        if extra > 0 {
+                                            Text("+\(extra)").font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .lineLimit(1)
+                                }
                             }
                             Spacer()
                             Button {
@@ -238,9 +342,72 @@ struct SearchView: View {
         .onExitCommand { state.hidePanel?() }
         .sheet(isPresented: $state.editing) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Spaceの名前と検索用の別名").font(.headline)
+                Text("Spaceの名前と検索タグ").font(.headline)
                 TextField("表示名（例：趣味）", text: $state.nameDraft)
-                TextField("検索用の別名（例：shumi chrome）", text: $state.aliasesDraft)
+                Text("検索タグ").font(.subheadline.weight(.medium))
+                TextField(state.editingTagIndex == nil
+                          ? "タグを入力してEnterで追加（スペースも使用可）"
+                          : "タグを編集してEnterで確定", text: $state.keywordInput)
+                    .focused($isTagInputFocused)
+                    .onSubmit {
+                        state.commitPendingKeyword()
+                        isTagInputFocused = true
+                    }
+                if !state.tagsDraft.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(state.tagsDraft.indices, id: \.self) { index in
+                                // Both edit and delete controls belong to the
+                                // SAME pill. The X is intentionally inside its
+                                // right edge, not a floating control between tags.
+                                HStack(spacing: 5) {
+                                    Button {
+                                        state.beginTagEdit(at: index)
+                                        isTagInputFocused = true
+                                    } label: {
+                                        Text("#" + state.tagsDraft[index])
+                                            .lineLimit(1)
+                                    }
+                                    .help("クリックしてタグを編集")
+                                    Button {
+                                        state.removeTag(at: index)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(.tertiary)
+                                    }
+                                    .help("「\(state.tagsDraft[index])」を削除")
+                                    .accessibilityLabel("タグ「\(state.tagsDraft[index])」を削除")
+                                }
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 9)
+                                .padding(.vertical, 5)
+                                .background(
+                                    Color.secondary.opacity(state.editingTagIndex == index ? 0.20 : 0.10),
+                                    in: Capsule()
+                                )
+                            }
+                        }
+                    }
+                }
+                Text("Enterで追加・確定。タグをクリックすると再編集、×で削除できます。")
+                    .font(.caption).foregroundStyle(.secondary)
+                if !state.editingAppNames.isEmpty {
+                    Text("開いているアプリ（自動タグ）")
+                        .font(.subheadline.weight(.medium))
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(FuzzySearch.appTags(from: state.editingAppNames,
+                                                        excluding: state.tagsDraft), id: \.self) { app in
+                                SpaceTag(title: app, isAutomatic: true)
+                            }
+                        }
+                    }
+                    Text("アプリのタグは保存せず、検索パネルを開くたびに更新します。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 if state.editingIsSessionOnly {
                     Text("このSpaceには識別用UUIDがありません。誤ったSpaceへの名前引き継ぎを防ぐため、名前はONIWAを終了するまで有効です。")
                         .font(.caption)
@@ -249,13 +416,12 @@ struct SearchView: View {
                 }
                 HStack {
                     if state.hasEditingLabel {
-                        Button("名前と別名を削除") { state.deleteLabel() }
+                        Button("名前とタグを削除") { state.deleteLabel() }
                             .foregroundStyle(.red)
                     }
                     Spacer()
                     Button("キャンセル") { state.cancelEdit() }
                     Button("保存") { state.saveLabel() }
-                        .keyboardShortcut(.defaultAction)
                 }
             }
             .padding(20)
