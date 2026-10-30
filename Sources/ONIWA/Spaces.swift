@@ -564,8 +564,29 @@ final class SpaceSwitcher {
                                      reader: SpaceReader) -> Result<Void, Error> {
         // Observe beyond the documented/reproduced ~400 ms late Dock yank;
         // the SkyLight current ID can initially look correct.
-        Thread.sleep(forTimeInterval: 0.85)
-        let live = reader.displays(includeAppNames: false)
+        // Fast gestures can update the SkyLight current ID before Dock's
+        // delayed app activation or a previous gesture finishes. Sample the
+        // settling interval without changing the fast-path transition logic.
+        // Ordinary keyboard switching retains its single 850ms readback.
+        let sampleTimes: [TimeInterval] = InstantSwitchSettings.enabled
+            ? [0.15, 0.35, 0.60, 0.85] : [0.85]
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        var live: [DisplayGroup] = []
+        for scheduledAt in sampleTimes {
+            let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+            Thread.sleep(forTimeInterval: max(0, scheduledAt - elapsed))
+            live = reader.displays(includeAppNames: false)
+            if InstantSwitchSettings.enabled {
+                let measuredMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
+                let current = live.first(where: { $0.id == target.displayID })?.currentID
+                SpaceSwitchDiagnostics.record(
+                    "single-settle-sample t=\(measuredMS)ms "
+                    + "display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
+                    + "expected=\(target.systemID) "
+                    + "current=\(current.map(String.init) ?? "missing") "
+                    + "layout=\(traceLayout(live))")
+            }
+        }
         let targetDisplay = live.first(where: { $0.id == target.displayID })
         let actual = targetDisplay?.currentID
         let matching = targetDisplay?.spaces.filter { $0.identity == target.identity } ?? []
@@ -663,6 +684,7 @@ final class SpaceSwitcher {
                                  displayID: String, reader: SpaceReader,
                                  beforeOthers: [String: UInt64],
                                  timeout: TimeInterval) -> StepOutcome {
+        let startedAt = ProcessInfo.processInfo.systemUptime
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             Thread.sleep(forTimeInterval: pollInterval)
@@ -676,7 +698,8 @@ final class SpaceSwitcher {
             case .confirmed:
                 SpaceSwitchDiagnostics.record(
                     "confirmed target=\(SpaceSwitchDiagnostics.shortDisplay(displayID)) "
-                    + "from=\(previous) to=\(expected)")
+                    + "from=\(previous) to=\(expected) "
+                    + "latency=\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))ms")
                 return .confirmed
             case .waiting:
                 break
