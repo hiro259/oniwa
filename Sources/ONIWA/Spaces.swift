@@ -157,6 +157,7 @@ final class SpaceSwitcher {
 
     private func performPairSwitch(_ pair: SpacePair) -> Result<Void, Error> {
         let reader = SpaceReader.shared
+        SpaceSwitchDiagnostics.record("pair start id=\(pair.id)")
         let before = reader.displays(includeAppNames: false)
         guard let resolved = SpacePairResolver.resolve(
             pair, in: before.flatMap(\.spaces).map(\.identity)),
@@ -236,6 +237,10 @@ final class SpaceSwitcher {
         }
 
         let originalOrder = initial.spaces.map(\.systemID)
+        SpaceSwitchDiagnostics.record(
+            "target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
+            + "initial=\(initial.currentID.map(String.init) ?? "unknown") "
+            + "expected=\(target.systemID) order=\(originalOrder)")
         guard let originalCurrentID = initial.currentID else {
             return .failure(SwitchFailure("現在表示中のSpaceを確認できません。"))
         }
@@ -247,17 +252,11 @@ final class SpaceSwitcher {
                 "移動先のモニターを識別できません。画面構成を確認してください。"))
         }
 
-        // The built-in Ctrl+arrow Space shortcut acts on the display under the
-        // pointer on Macs with "Displays have separate Spaces" enabled.
-        // If the pointer is already on that display, do not needlessly warp it.
-        let pointer = CGEvent(source: nil)?.location
-        if pointer == nil || !displayBounds.contains(pointer!) {
-            let error = CGWarpMouseCursorPosition(
-                CGPoint(x: displayBounds.midX, y: displayBounds.midY))
-            guard error == .success else {
-                return .failure(SwitchFailure("対象モニターにカーソルを移せませんでした。"))
-            }
-            Thread.sleep(forTimeInterval: 0.07)
+        // Warp by itself produces no mouse movement event. Inform Dock of the
+        // new pointer display and verify it before a synthetic Space gesture.
+        guard routePointer(to: displayBounds, displayID: target.displayID) else {
+            return .failure(SwitchFailure(
+                "対象モニターへのカーソル移動を確認できません。安全のため停止しました。"))
         }
 
         // Each successful step must land on precisely the neighboring Space.
@@ -265,9 +264,17 @@ final class SpaceSwitcher {
         // We intentionally do not chase an arbitrary new position if the user
         // changes Spaces or the system rearranges the layout during navigation.
         for _ in 0..<originalOrder.count {
-            guard let live = reader.displays(includeAppNames: false)
-                .first(where: { $0.id == target.displayID }) else {
+            let layout = reader.displays(includeAppNames: false)
+            guard let live = layout.first(where: { $0.id == target.displayID }) else {
                 return .failure(SwitchFailure("対象モニターが接続解除されました。"))
+            }
+            guard layout.allSatisfy({ $0.currentID != nil }) else {
+                return .failure(SwitchFailure(
+                    "一部モニターのSpace状態が不明なため、切り替えを中断しました。"))
+            }
+            var beforeOthers: [String: UInt64] = [:]
+            for display in layout where display.id != target.displayID {
+                if let id = display.currentID { beforeOthers[display.id] = id }
             }
             let order = live.spaces.map(\.systemID)
             guard live.spaces.contains(where: { $0.identity == target.identity }) else {
@@ -294,6 +301,15 @@ final class SpaceSwitcher {
             case .arrived:
                 return .success(())
             case let .move(direction, nextSpaceID):
+                SpaceSwitchDiagnostics.record(
+                    "step target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
+                    + "from=\(current) to=\(nextSpaceID) "
+                    + "mode=\(InstantSwitchSettings.enabled ? "instant-first" : "keyboard")")
+                guard let cursor = CGEvent(source: nil)?.location,
+                      displayBounds.contains(cursor) else {
+                    return .failure(SwitchFailure(
+                        "切り替え中にカーソルが別モニターへ移動しました。中断しました。"))
+                }
                 // Post the standard Control+arrow Mission Control shortcut
                 // directly through Core Graphics. This avoids sending Apple
                 // Events to System Events, which can fail with error 1002 even
