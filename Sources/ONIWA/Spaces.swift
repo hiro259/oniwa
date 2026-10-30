@@ -329,7 +329,7 @@ final class SpaceSwitcher {
                     switch waitForNeighbor(
                         previous: current, expected: nextSpaceID,
                         displayID: target.displayID, reader: reader,
-                        timeout: 0.9
+                        beforeOthers: beforeOthers, timeout: 0.9
                     ) {
                     case .confirmed:
                         // The next loop verifies the next neighboring Space.
@@ -337,6 +337,9 @@ final class SpaceSwitcher {
                     case .wrongSpace:
                         return .failure(SwitchFailure(
                             "瞬時切り替えで別のSpaceに移動しました。安全のため自動切り替えを停止しました。"))
+                    case .wrongDisplay:
+                        return .failure(SwitchFailure(
+                            "瞬時切り替えが別モニターに作用しました。追加操作を停止しました。診断ログを確認してください。"))
                     case .disconnected:
                         return .failure(SwitchFailure(
                             "瞬時切り替え中にモニターを認識できなくなりました。"))
@@ -348,6 +351,18 @@ final class SpaceSwitcher {
                             .first(where: { $0.id == target.displayID }) else {
                             return .failure(SwitchFailure(
                                 "対象モニターが接続解除されました。"))
+                        }
+                        // Do not fall back if the first attempt moved another
+                        // display. That would otherwise produce two wrong steps.
+                        let outcome = SpaceSwitchObservation.evaluate(
+                            targetDisplay: target.displayID, beforeTarget: current,
+                            expectedTarget: nextSpaceID, beforeOthers: beforeOthers,
+                            after: currentSpaceIDs(reader.displays(includeAppNames: false))
+                        )
+                        guard outcome == .waiting || outcome == .confirmed else {
+                            SpaceSwitchDiagnostics.record("fallback blocked: \(outcome)")
+                            return .failure(SwitchFailure(
+                                "瞬時切り替えが別モニターに作用したか、状態を確認できません。追加操作を停止しました。"))
                         }
                         switch InstantSwitchPolicy.fallbackDecision(
                             previous: current, expected: nextSpaceID,
@@ -407,12 +422,15 @@ final class SpaceSwitcher {
                 switch waitForNeighbor(
                     previous: current, expected: nextSpaceID,
                     displayID: target.displayID, reader: reader,
-                    timeout: transitionTimeout
+                    beforeOthers: beforeOthers, timeout: transitionTimeout
                 ) {
                 case .confirmed: break
                 case .wrongSpace:
                     return .failure(SwitchFailure(
                         "予定とは異なるSpaceへ移動しました。これ以上の自動切り替えを停止しました。"))
+                case .wrongDisplay:
+                    return .failure(SwitchFailure(
+                        "キー操作が別モニターに作用しました。追加操作を停止しました。診断ログを確認してください。"))
                 case .disconnected:
                     return .failure(SwitchFailure("切り替え中にモニターを認識できなくなりました。"))
                 case .timedOut:
@@ -430,23 +448,91 @@ final class SpaceSwitcher {
     private enum StepOutcome {
         case confirmed
         case wrongSpace
+        case wrongDisplay
         case disconnected
         case timedOut
     }
 
+    private func currentSpaceIDs(_ groups: [DisplayGroup]) -> [String: UInt64] {
+        var ids: [String: UInt64] = [:]
+        for group in groups {
+            if let id = group.currentID { ids[group.id] = id }
+        }
+        return ids
+    }
+
+    /// Warp changes the visible pointer but sends no movement event. To update
+    /// Dock's per-display routing, also post a genuine mouseMoved event.
+    /// Never synthesize a click or give focus to an unrelated window.
+    private func routePointer(to bounds: CGRect, displayID: String) -> Bool {
+        let initial = CGEvent(source: nil)?.location
+        let point: CGPoint
+        if let initial, bounds.insetBy(dx: 2, dy: 2).contains(initial) {
+            point = CGPoint(x: initial.x + (initial.x < bounds.midX ? 1 : -1),
+                            y: initial.y)
+        } else {
+            let middle = CGPoint(x: bounds.midX, y: bounds.midY)
+            guard CGWarpMouseCursorPosition(middle) == .success else {
+                SpaceSwitchDiagnostics.record("cursor warp failed")
+                return false
+            }
+            point = CGPoint(x: middle.x + 1, y: middle.y)
+        }
+        guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved,
+                                 mouseCursorPosition: point, mouseButton: .left)
+        else {
+            SpaceSwitchDiagnostics.record("mouseMoved event creation failed")
+            return false
+        }
+        move.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.14)
+        let positioned = CGEvent(source: nil)?.location.map { bounds.contains($0) } ?? false
+        SpaceSwitchDiagnostics.record(
+            "cursor-target=\(SpaceSwitchDiagnostics.shortDisplay(displayID)) "
+            + "mouseMoved=true positioned=\(positioned)")
+        return positioned
+    }
+
     private func waitForNeighbor(previous: UInt64, expected: UInt64,
                                  displayID: String, reader: SpaceReader,
+                                 beforeOthers: [String: UInt64],
                                  timeout: TimeInterval) -> StepOutcome {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             Thread.sleep(forTimeInterval: pollInterval)
-            guard let display = reader.displays(includeAppNames: false)
-                .first(where: { $0.id == displayID }) else { return .disconnected }
-            guard let now = display.currentID else { continue }
-            if now == expected { return .confirmed }
-            // One unexpected step may indicate a user action or shortcut conflict.
-            if now != previous { return .wrongSpace }
+            let displays = reader.displays(includeAppNames: false)
+            let observed = currentSpaceIDs(displays)
+            let outcome = SpaceSwitchObservation.evaluate(
+                targetDisplay: displayID, beforeTarget: previous,
+                expectedTarget: expected, beforeOthers: beforeOthers,
+                after: observed)
+            switch outcome {
+            case .confirmed:
+                SpaceSwitchDiagnostics.record(
+                    "confirmed target=\(SpaceSwitchDiagnostics.shortDisplay(displayID)) "
+                    + "from=\(previous) to=\(expected)")
+                return .confirmed
+            case .waiting:
+                break
+            case .wrongTarget:
+                SpaceSwitchDiagnostics.record("wrong-target target=\(SpaceSwitchDiagnostics.shortDisplay(displayID))")
+                return .wrongSpace
+            case .otherDisplayChanged:
+                let changes = beforeOthers.map { key, previousID in
+                    "\(SpaceSwitchDiagnostics.shortDisplay(key)):\(previousID)->\(observed[key].map(String.init) ?? "missing")"
+                }.joined(separator: " ")
+                SpaceSwitchDiagnostics.record(
+                    "WRONG-DISPLAY target=\(SpaceSwitchDiagnostics.shortDisplay(displayID)) "
+                    + "other=\(changes)")
+                return .wrongDisplay
+            case .displayUnavailable:
+                SpaceSwitchDiagnostics.record("missing display during step")
+                return .disconnected
+            }
         }
+        SpaceSwitchDiagnostics.record(
+            "timeout target=\(SpaceSwitchDiagnostics.shortDisplay(displayID)) "
+            + "from=\(previous) expected=\(expected)")
         return .timedOut
     }
 
