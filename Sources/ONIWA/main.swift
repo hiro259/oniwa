@@ -384,7 +384,7 @@ struct SearchView: View {
                 Spacer()
                 Text(state.shortcutDescription).foregroundStyle(.secondary).font(.caption)
             }
-            TextField("Search Spaces, apps, or aliases…", text: $state.query)
+            TextField("Space・セット・タグを検索…", text: $state.query)
                 .textFieldStyle(.roundedBorder)
                 .focused($isSearchFocused)
                 .onSubmit { state.activateSelected() }
@@ -395,6 +395,73 @@ struct SearchView: View {
             ScrollViewReader { scroll in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 3) {
+                    ForEach(state.pairResults) { pair in
+                        let destination = state.resolvedSpaces(for: pair)
+                        let isCurrent = destination.map { $0.0.isCurrent && $0.1.isCurrent } ?? false
+                        HStack(spacing: 9) {
+                            Image(systemName: "square.on.square")
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack {
+                                    Text(pair.name)
+                                        .fontWeight(state.pairResultID(pair) == state.selectedID
+                                            || isCurrent ? .semibold : .regular)
+                                        .lineLimit(1)
+                                    Text("セット")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                                    if isCurrent {
+                                        Label("current", systemImage: "checkmark.circle.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                if let (first, second) = destination {
+                                    Text("\(first.displayName): \(state.spaceName(first))  +  \(second.displayName): \(state.spaceName(second))")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                } else {
+                                    Label("Spaceが見つかりません · セットを再設定してください",
+                                          systemImage: "exclamationmark.triangle")
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                        .lineLimit(1)
+                                }
+                            }
+                            Spacer()
+                            Button {
+                                state.beginPairEdit(pair)
+                            } label: {
+                                Image(systemName: "pencil")
+                            }
+                            .buttonStyle(.borderless)
+                            .help("セットを編集または削除")
+                        }
+                        .padding(8)
+                        .background(state.pairResultID(pair) == state.selectedID
+                            ? Color.accentColor.opacity(0.16)
+                            : (isCurrent ? Color.secondary.opacity(0.04) : Color.clear))
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 7)
+                                .strokeBorder(isCurrent ? Color.secondary.opacity(0.38) : Color.clear,
+                                              lineWidth: 1)
+                                .allowsHitTesting(false)
+                        }
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if state.selectedID == state.pairResultID(pair) {
+                                state.activatePair(pair)
+                            } else {
+                                state.selectedID = state.pairResultID(pair)
+                            }
+                        }
+                        .id(state.pairResultID(pair))
+                    }
                     ForEach(state.results) { space in
                         HStack(spacing: 9) {
                             Image(systemName: space.kind == 4 ? "arrow.up.left.and.arrow.down.right" : "display")
@@ -487,6 +554,12 @@ struct SearchView: View {
                 Text("↑↓ 選択   ↵ 切り替え   Esc 閉じる")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
+                Button {
+                    state.newPair()
+                } label: {
+                    Label("セットを追加", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
                 Button("Refresh") { state.refresh() }
                     .buttonStyle(.borderless)
             }
@@ -494,10 +567,15 @@ struct SearchView: View {
         .padding(16)
         .frame(width: 500, height: 420)
         .onAppear { isSearchFocused = true }
-        .onChange(of: state.query) { _ in state.selectedID = state.results.first?.id }
+        .onChange(of: state.query) { _ in state.selectedID = state.allResultIDs.first }
         .onChange(of: state.labelRevision) { _ in
-            if !state.results.contains(where: { $0.id == state.selectedID }) {
-                state.selectedID = state.results.first?.id
+            if !state.allResultIDs.contains(state.selectedID ?? "") {
+                state.selectedID = state.allResultIDs.first
+            }
+        }
+        .onChange(of: state.pairRevision) { _ in
+            if !state.allResultIDs.contains(state.selectedID ?? "") {
+                state.selectedID = state.allResultIDs.first
             }
         }
         .onMoveCommand { direction in
@@ -591,6 +669,45 @@ struct SearchView: View {
             }
             .padding(20)
             .frame(width: 380)
+        }
+        .sheet(isPresented: $state.pairEditing) {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Spaceセット").font(.headline)
+                Text("2つのモニターで同時に使うSpaceを登録します。")
+                    .font(.caption).foregroundStyle(.secondary)
+                TextField("セット名（例：ONIWA開発）", text: $state.pairNameDraft)
+                Picker("1つ目のモニター", selection: $state.pairFirstKey) {
+                    ForEach(state.pairEligibleSpaces) { space in
+                        Text("\(space.displayName) · \(state.spaceName(space)) · Space \(space.index + 1)")
+                            .tag(space.identity.persistentKey ?? "")
+                    }
+                }
+                .onChange(of: state.pairFirstKey) { _ in
+                    state.firstPairSpaceChanged()
+                }
+                Picker("2つ目のモニター", selection: $state.pairSecondKey) {
+                    ForEach(state.pairSecondChoices) { space in
+                        Text("\(space.displayName) · \(state.spaceName(space)) · Space \(space.index + 1)")
+                            .tag(space.identity.persistentKey ?? "")
+                    }
+                }
+                if !state.pairCanSave {
+                    Text("別々のモニターにある、識別可能な2つのSpaceを選んでください。削除されたSpaceやUUIDのないSpaceは登録できません。")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    if state.editingPairID != nil {
+                        Button("セットを削除", role: .destructive) { state.deletePair() }
+                    }
+                    Spacer()
+                    Button("キャンセル") { state.pairEditing = false }
+                    Button("保存") { state.savePair() }
+                        .disabled(!state.pairCanSave)
+                }
+            }
+            .padding(20)
+            .frame(width: 460)
         }
     }
 
@@ -765,7 +882,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleKeyboardEvent(_ event: NSEvent) -> NSEvent? {
         guard panel?.isKeyWindow == true,
-              !state.editing, !state.isSwitching else { return event }
+              !state.editing, !state.pairEditing, !state.isSwitching else { return event }
 
         // Let macOS's input method handle candidate navigation and Return when
         // a Japanese/Chinese/Korean composition is still active.
