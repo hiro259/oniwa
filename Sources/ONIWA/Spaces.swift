@@ -381,6 +381,16 @@ final class SpaceSwitcher {
                     }
                 }
 
+                // An instant attempt may wait almost a second. If the user
+                // moved the cursor to another display during that wait,
+                // do not route the keyboard fallback to the wrong screen.
+                guard let fallbackPointer = CGEvent(source: nil)?.location,
+                      displayBounds.contains(fallbackPointer) else {
+                    SpaceSwitchDiagnostics.record("fallback aborted: pointer left target display")
+                    return .failure(SwitchFailure(
+                        "キー送信前にカーソルが対象モニターを離れたため中断しました。"))
+                }
+
                 // On macOS 26/27, Mission Control can ignore a synthetic
                 // Ctrl+Arrow sent with only .maskControl. Reproduce the
                 // hardware keyboard event sequence instead:
