@@ -1,5 +1,12 @@
 import Foundation
 
+public enum SpaceListSortMode: String, Codable, CaseIterable {
+    case recent
+    case original
+    case name
+    case custom
+}
+
 /// User-controlled order of Space search results.
 ///
 /// Keys must be stable: monitor-scoped Space UUIDs or persisted pair UUIDs.
@@ -12,11 +19,16 @@ public final class SpaceListOrderStore {
     private struct Snapshot: Codable {
         var pinned: [String]
         var recent: [String]
+        // Optional for decoding the v1 snapshot without losing pins or MRU.
+        var sortMode: SpaceListSortMode?
+        var customOrder: [String]?
     }
 
     private let defaults: UserDefaults
     private var pinned: [String] = []
     private var recent: [String] = []
+    private var customOrder: [String] = []
+    public private(set) var sortMode: SpaceListSortMode = .recent
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -24,6 +36,8 @@ public final class SpaceListOrderStore {
               let saved = try? JSONDecoder().decode(Snapshot.self, from: data) else { return }
         pinned = Self.deduplicated(saved.pinned)
         recent = Array(Self.deduplicated(saved.recent).prefix(Self.maximumRecentEntries))
+        sortMode = saved.sortMode ?? .recent
+        customOrder = Self.deduplicated(saved.customOrder ?? [])
     }
 
     private static func deduplicated(_ keys: [String]) -> [String] {
@@ -67,42 +81,106 @@ public final class SpaceListOrderStore {
     public func remove(_ key: String) {
         pinned.removeAll { $0 == key }
         recent.removeAll { $0 == key }
+        customOrder.removeAll { $0 == key }
         persist()
     }
 
-    /// Keep original order as a deterministic fallback for never-used items.
-    /// During search, caller can choose to preserve fuzzy rank for unpinned
-    /// rows, while still showing matching pins first.
-    public func orderedKeys(_ keys: [String], useRecency: Bool = true) -> [String] {
-        let pinPositions = Dictionary(uniqueKeysWithValues: pinned.enumerated().map {
+    /// Changing modes does not discard an existing manual order.
+    /// The first entry into custom mode starts from the currently shown order.
+    public func setSortMode(_ mode: SpaceListSortMode, visibleKeys: [String]) {
+        if mode == .custom && customOrder.isEmpty {
+            customOrder = Self.deduplicated(visibleKeys)
+        }
+        sortMode = mode
+        persist()
+    }
+
+    /// Move a visible row into position. Pinned items can be reordered among
+    /// pins, and ordinary items among ordinary items; dragging cannot silently
+    /// pin/unpin a row. A drop on the row below moves after it.
+    @discardableResult
+    public func moveCustom(_ source: String, to target: String,
+                           visibleKeys: [String]) -> Bool {
+        guard sortMode == .custom, source != target, !source.isEmpty, !target.isEmpty,
+              visibleKeys.contains(source), visibleKeys.contains(target) else { return false }
+        let sourcePinned = isPinned(source)
+        guard sourcePinned == isPinned(target) else { return false }
+        if sourcePinned {
+            guard Self.move(source, to: target, in: &pinned) else { return false }
+        } else {
+            // Preserve hidden/disconnected keys already in the custom layout.
+            for key in visibleKeys where !customOrder.contains(key) {
+                customOrder.append(key)
+            }
+            guard Self.move(source, to: target, in: &customOrder) else { return false }
+        }
+        persist()
+        return true
+    }
+
+    private static func move(_ source: String, to target: String,
+                             in keys: inout [String]) -> Bool {
+        guard let a = keys.firstIndex(of: source),
+              let b = keys.firstIndex(of: target) else { return false }
+        let value = keys.remove(at: a)
+        let newIndex = keys.firstIndex(of: target)!
+        keys.insert(value, at: a < b ? newIndex + 1 : newIndex)
+        return true
+    }
+
+    /// Pinned entries always come first. When a query is active, the unpinned
+    /// portion keeps its incoming fuzzy-search rank, regardless of mode.
+    /// Original order comes from the supplied keys (pairs then macOS Spaces).
+    public func orderedKeys(_ keys: [String], useRecency: Bool = true,
+                            names: [String: String] = [:]) -> [String] {
+        let mode = useRecency ? sortMode : .original
+        let pins = Dictionary(uniqueKeysWithValues: pinned.enumerated().map {
             ($0.element, $0.offset)
         })
-        let recentPositions = Dictionary(uniqueKeysWithValues: recent.enumerated().map {
+        let usage = Dictionary(uniqueKeysWithValues: recent.enumerated().map {
+            ($0.element, $0.offset)
+        })
+        let manual = Dictionary(uniqueKeysWithValues: customOrder.enumerated().map {
             ($0.element, $0.offset)
         })
         return keys.enumerated().sorted { left, right in
             let a = left.element
             let b = right.element
-            let aPin = pinPositions[a]
-            let bPin = pinPositions[b]
+            let aPin = pins[a]
+            let bPin = pins[b]
             if aPin != nil || bPin != nil {
                 if let aPin, let bPin { return aPin < bPin }
                 return aPin != nil
             }
-            if useRecency {
-                let aRecent = recentPositions[a]
-                let bRecent = recentPositions[b]
-                if aRecent != nil || bRecent != nil {
-                    if let aRecent, let bRecent { return aRecent < bRecent }
-                    return aRecent != nil
+            switch mode {
+            case .recent:
+                let aRank = usage[a], bRank = usage[b]
+                if aRank != nil || bRank != nil {
+                    if let aRank, let bRank { return aRank < bRank }
+                    return aRank != nil
                 }
+            case .name:
+                let aName = FuzzySearch.normalized(names[a] ?? a)
+                let bName = FuzzySearch.normalized(names[b] ?? b)
+                let order = aName.localizedStandardCompare(bName)
+                if order != .orderedSame { return order == .orderedAscending }
+            case .custom:
+                let aRank = manual[a], bRank = manual[b]
+                if aRank != nil || bRank != nil {
+                    if let aRank, let bRank { return aRank < bRank }
+                    return aRank != nil
+                }
+            case .original:
+                break
             }
             return left.offset < right.offset
         }.map(\.element)
     }
 
     private func persist() {
-        guard let data = try? JSONEncoder().encode(Snapshot(pinned: pinned, recent: recent))
+        guard let data = try? JSONEncoder().encode(Snapshot(pinned: pinned, recent: recent,
+                                                    sortMode: sortMode,
+                                                    customOrder: customOrder))
         else { return }
         defaults.set(data, forKey: Self.storageKey)
     }
