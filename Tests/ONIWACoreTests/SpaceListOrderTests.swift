@@ -121,4 +121,18 @@ final class SpaceListOrderTests: XCTestCase {
         XCTAssertEqual(order.orderedKeys(["b", "a"]), ["a", "b"])
     }
 
+    func testTransientSpaceKeysDoNotEnterPersistedCustomOrder() {
+        let defaults = defaults()
+        let runtime = "transient:runtime:display:123"
+        let order = SpaceListOrderStore(defaults: defaults)
+        order.setSortMode(.custom, visibleKeys: ["stable-a", runtime, "stable-b"])
+        XCTAssertFalse(order.moveCustom(runtime, to: "stable-a",
+                                        visibleKeys: ["stable-a", runtime, "stable-b"]))
+        XCTAssertTrue(order.moveCustom("stable-b", to: "stable-a",
+                                       visibleKeys: ["stable-a", runtime, "stable-b"]))
+        let restarted = SpaceListOrderStore(defaults: defaults)
+        XCTAssertEqual(restarted.orderedKeys(["stable-a", "stable-b", runtime]),
+                       ["stable-b", "stable-a", runtime])
+    }
+
 }
