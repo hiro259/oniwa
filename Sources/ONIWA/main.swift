@@ -1042,11 +1042,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var instantPacingItem: NSMenuItem?
     private var directSwitchItem: NSMenuItem?
     private var pairSingleSessionItem: NSMenuItem?
+    private var pairHybridItem: NSMenuItem?
     private var missionControlWaitRootItem: NSMenuItem?
     private var missionControlResetWaitItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // A former one-session experiment may be enabled in UserDefaults.
+        // Treat hybrid and one-session as mutually exclusive at every launch.
+        if MissionControlPairHybridSettings.enabled
+            && MissionControlPairSingleSessionSettings.enabled {
+            MissionControlPairSingleSessionSettings.enabled = false
+        }
         NSApp.setActivationPolicy(.accessory)
         spaceEventObserver = SpaceWorkspaceEventObserver()
         state.observeCurrentSpaces()
@@ -1122,6 +1129,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pairSingleSessionItem = pairOnce
         pairOnce.isEnabled = MissionControlDirectSettings.enabled
         menu.addItem(pairOnce)
+        let pairHybrid = NSMenuItem(
+            title: "2画面セット：混合式（内蔵MC＋拡張キーボード・試験的）",
+            action: #selector(togglePairHybrid), keyEquivalent: "")
+        pairHybrid.toolTip = "内蔵ディスプレイはMission Control直接移動、"
+            + "拡張ディスプレイは通常のControl＋矢印キーで移動します。"
+            + "登録順によらず物理画面を判別します。初期OFF。"
+        pairHybrid.state = MissionControlPairHybridSettings.enabled ? .on : .off
+        pairHybrid.target = self
+        pairHybridItem = pairHybrid
+        pairHybrid.isEnabled = MissionControlDirectSettings.enabled
+        menu.addItem(pairHybrid)
         let waitRoot = NSMenuItem(title: "Mission Control待機時間：300ms（推奨）",
                                   action: nil, keyEquivalent: "")
         waitRoot.toolTip = "Spaceサムネイルを検出した後の追加待機時間です。"
@@ -1181,15 +1199,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         instantSwitchItem?.isEnabled = !MissionControlDirectSettings.enabled
         instantPacingItem?.isEnabled = !MissionControlDirectSettings.enabled
         pairSingleSessionItem?.isEnabled = MissionControlDirectSettings.enabled
+        pairHybridItem?.isEnabled = MissionControlDirectSettings.enabled
     }
 
     @objc private func togglePairSingleSession() {
         guard MissionControlDirectSettings.enabled else { return }
         MissionControlPairSingleSessionSettings.enabled.toggle()
+        if MissionControlPairSingleSessionSettings.enabled {
+            MissionControlPairHybridSettings.enabled = false
+            pairHybridItem?.state = .off
+        }
         pairSingleSessionItem?.state =
             MissionControlPairSingleSessionSettings.enabled ? .on : .off
         SpaceSwitchDiagnostics.record(
             "mc-pair-once setting enabled=\(MissionControlPairSingleSessionSettings.enabled)")
+    }
+
+    @objc private func togglePairHybrid() {
+        guard MissionControlDirectSettings.enabled else { return }
+        MissionControlPairHybridSettings.enabled.toggle()
+        if MissionControlPairHybridSettings.enabled {
+            // Never allow two experimental pair routes to be active together.
+            MissionControlPairSingleSessionSettings.enabled = false
+            pairSingleSessionItem?.state = .off
+        }
+        pairHybridItem?.state = MissionControlPairHybridSettings.enabled ? .on : .off
+        SpaceSwitchDiagnostics.record(
+            "pair-hybrid setting enabled=\(MissionControlPairHybridSettings.enabled)")
     }
 
 @objc private func promptMissionControlCustomWait() {
