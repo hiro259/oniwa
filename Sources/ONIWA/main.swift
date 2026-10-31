@@ -1038,22 +1038,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var keyboardMonitor: Any?
     private var spaceEventObserver: SpaceWorkspaceEventObserver?
     private var spaceChangeObserverToken: NSObjectProtocol?
-    private var instantSwitchItem: NSMenuItem?
+    private var singleSwitchItems: [SingleSpaceSwitchMode: NSMenuItem] = [:]
+    private var pairSwitchItems: [PairSpaceSwitchMode: NSMenuItem] = [:]
     private var instantPacingItem: NSMenuItem?
-    private var directSwitchItem: NSMenuItem?
-    private var pairSingleSessionItem: NSMenuItem?
-    private var pairHybridItem: NSMenuItem?
     private var missionControlWaitRootItem: NSMenuItem?
     private var missionControlResetWaitItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // A former one-session experiment may be enabled in UserDefaults.
-        // Treat hybrid and one-session as mutually exclusive at every launch.
-        if MissionControlPairHybridSettings.enabled
-            && MissionControlPairSingleSessionSettings.enabled {
-            MissionControlPairSingleSessionSettings.enabled = false
-        }
+        // Adopt independent, exclusive single/pair selections once.
+        SwitchModeSettings.migrateLegacySettingsIfNeeded()
         NSApp.setActivationPolicy(.accessory)
         spaceEventObserver = SpaceWorkspaceEventObserver()
         state.observeCurrentSpaces()
@@ -1094,56 +1088,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutMenu.addItem(recorderItem)
         shortcutRoot.submenu = shortcutMenu
         menu.addItem(shortcutRoot)
-        let instant = NSMenuItem(title: "瞬時切り替え（試験的）",
-                                 action: #selector(toggleInstantSwitch),
-                                 keyEquivalent: "")
-        instant.toolTip = "ONIWAでのみ瞬時切り替えを使用します。失敗時は通常切り替えに戻ります。"
-        instant.state = InstantSwitchSettings.enabled ? .on : .off
-        instant.target = self
-        instantSwitchItem = instant
-        menu.addItem(instant)
+        // Radio-style groups: one active choice per group, persisted separately.
+        let singleRoot = NSMenuItem(title: "単独Spaceの切り替え",
+                                    action: nil, keyEquivalent: "")
+        let singleMenu = NSMenu(title: "単独Spaceの切り替え")
+        let singleOptions: [(SingleSpaceSwitchMode, String)] = [
+            (.keyboard, "キーボード移動"),
+            (.instant, "瞬時切り替え（試験的）"),
+            (.missionControl, "Mission Control直接移動（試験的）")
+        ]
+        for (mode, title) in singleOptions {
+            let option = NSMenuItem(title: title,
+                                    action: #selector(selectSingleSwitchMode(_:)),
+                                    keyEquivalent: "")
+            option.representedObject = mode.rawValue
+            option.state = SwitchModeSettings.single == mode ? .on : .off
+            option.target = self
+            singleSwitchItems[mode] = option
+            singleMenu.addItem(option)
+        }
+        singleRoot.submenu = singleMenu
+        menu.addItem(singleRoot)
+
+        let pairRoot = NSMenuItem(title: "2画面セットの切り替え",
+                                  action: nil, keyEquivalent: "")
+        let pairMenu = NSMenu(title: "2画面セットの切り替え")
+        let pairOptions: [(PairSpaceSwitchMode, String)] = [
+            (.keyboard, "ディスプレイ移動式（キーボード）"),
+            (.hybrid, "混合式（内蔵MC＋拡張キーボード・試験的）"),
+            (.missionControlTwice, "Mission Control 2回方式")
+        ]
+        for (mode, title) in pairOptions {
+            let option = NSMenuItem(title: title,
+                                    action: #selector(selectPairSwitchMode(_:)),
+                                    keyEquivalent: "")
+            option.representedObject = mode.rawValue
+            option.state = SwitchModeSettings.pair == mode ? .on : .off
+            option.target = self
+            pairSwitchItems[mode] = option
+            pairMenu.addItem(option)
+        }
+        pairRoot.submenu = pairMenu
+        menu.addItem(pairRoot)
+
+        let detailRoot = NSMenuItem(title: "詳細設定", action: nil,
+                                    keyEquivalent: "")
+        let detailMenu = NSMenu(title: "詳細設定")
         let pacing = NSMenuItem(title: "瞬時切り替え・間隔テスト（450ms）",
                                 action: #selector(toggleInstantPacingProbe),
                                 keyEquivalent: "")
-        pacing.toolTip = "高速ジェスチャー間に450msの確認待ちを挿入します。切り替え不具合の切り分け専用です。"
+        pacing.toolTip = "単独Spaceの瞬時切り替え専用。高速ジェスチャー後の450ms安定確認です。"
         pacing.state = InstantSwitchSettings.pacingProbeEnabled ? .on : .off
+        pacing.isEnabled = SwitchModeSettings.single == .instant
         pacing.target = self
         instantPacingItem = pacing
-        menu.addItem(pacing)
-        let direct = NSMenuItem(title: "Mission Control直接移動（試験的）",
-                                action: #selector(toggleMissionControlDirectSwitch),
-                                keyEquivalent: "")
-        direct.toolTip = "Mission Controlを開き、SpaceボタンへAXPressを送ります。"
-            + "従来の瞬時切り替えより優先されます。"
-        direct.state = MissionControlDirectSettings.enabled ? .on : .off
-        direct.target = self
-        directSwitchItem = direct
-        menu.addItem(direct)
-        let pairOnce = NSMenuItem(
-            title: "2画面セット：Mission Control一回（試験的）",
-            action: #selector(togglePairSingleSession), keyEquivalent: "")
-        pairOnce.toolTip = "2画面のサムネイルを1回のMission Control表示で操作する実験です。"
-            + "失敗しても自動再試行しません。通常の2回方式は設定OFFで維持できます。"
-        pairOnce.state = MissionControlPairSingleSessionSettings.enabled ? .on : .off
-        pairOnce.target = self
-        pairSingleSessionItem = pairOnce
-        pairOnce.isEnabled = MissionControlDirectSettings.enabled
-        menu.addItem(pairOnce)
-        let pairHybrid = NSMenuItem(
-            title: "2画面セット：混合式（内蔵MC＋拡張キーボード・試験的）",
-            action: #selector(togglePairHybrid), keyEquivalent: "")
-        pairHybrid.toolTip = "内蔵ディスプレイはMission Control直接移動、"
-            + "拡張ディスプレイは通常のControl＋矢印キーで移動します。"
-            + "登録順によらず物理画面を判別します。初期OFF。"
-        pairHybrid.state = MissionControlPairHybridSettings.enabled ? .on : .off
-        pairHybrid.target = self
-        pairHybridItem = pairHybrid
-        pairHybrid.isEnabled = MissionControlDirectSettings.enabled
-        menu.addItem(pairHybrid)
+        detailMenu.addItem(pacing)
+
         let waitRoot = NSMenuItem(title: "Mission Control待機時間：300ms（推奨）",
                                   action: nil, keyEquivalent: "")
-        waitRoot.toolTip = "Spaceサムネイルを検出した後の追加待機時間です。"
-            + "Mission Controlの総表示時間とは異なります。300msが推奨値です。"
+        waitRoot.toolTip = "サムネイル検出後の追加待機時間です。総表示時間とは異なります。"
         missionControlWaitRootItem = waitRoot
         let waitMenu = NSMenu(title: "Mission Control待機時間")
         let customWait = NSMenuItem(title: "待機時間を設定…",
@@ -1158,7 +1161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         missionControlResetWaitItem = resetWait
         waitMenu.addItem(resetWait)
         waitRoot.submenu = waitMenu
-        menu.addItem(waitRoot)
+        detailMenu.addItem(waitRoot)
+        detailRoot.submenu = detailMenu
+        menu.addItem(detailRoot)
         updateMissionControlWaitMenuState()
         let diagnosis = NSMenuItem(title: "ショートカット診断…",
                                    action: #selector(showShortcutDiagnosis),
@@ -1173,62 +1178,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit ONIWA", action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items { item.target = self }
-        instantSwitchItem?.isEnabled = !MissionControlDirectSettings.enabled
-        instantPacingItem?.isEnabled = !MissionControlDirectSettings.enabled
         item.menu = menu
         statusItem = item
         state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
         state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
     }
 
-    @objc private func toggleInstantSwitch() {
-        InstantSwitchSettings.enabled.toggle()
-        instantSwitchItem?.state = InstantSwitchSettings.enabled ? .on : .off
+    @objc private func selectSingleSwitchMode(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let selected = SingleSpaceSwitchMode(rawValue: raw) else { return }
+        SwitchModeSettings.single = selected
+        for (mode, item) in singleSwitchItems {
+            item.state = mode == selected ? .on : .off
+        }
+        instantPacingItem?.isEnabled = selected == .instant
+        SpaceSwitchDiagnostics.record("single mode setting=\(selected.rawValue)")
+    }
+
+    @objc private func selectPairSwitchMode(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let selected = PairSpaceSwitchMode(rawValue: raw) else { return }
+        SwitchModeSettings.pair = selected
+        for (mode, item) in pairSwitchItems {
+            item.state = mode == selected ? .on : .off
+        }
+        SpaceSwitchDiagnostics.record("pair mode setting=\(selected.rawValue)")
     }
 
     @objc private func toggleInstantPacingProbe() {
+        guard SwitchModeSettings.single == .instant else { return }
         InstantSwitchSettings.pacingProbeEnabled.toggle()
-        instantPacingItem?.state = InstantSwitchSettings.pacingProbeEnabled ? .on : .off
+        instantPacingItem?.state =
+            InstantSwitchSettings.pacingProbeEnabled ? .on : .off
     }
 
-    @objc private func toggleMissionControlDirectSwitch() {
-        MissionControlDirectSettings.enabled.toggle()
-        directSwitchItem?.state = MissionControlDirectSettings.enabled ? .on : .off
-        // Save the existing instant and pacing preferences, just disable their
-        // menus while direct selection takes precedence.
-        instantSwitchItem?.isEnabled = !MissionControlDirectSettings.enabled
-        instantPacingItem?.isEnabled = !MissionControlDirectSettings.enabled
-        pairSingleSessionItem?.isEnabled = MissionControlDirectSettings.enabled
-        pairHybridItem?.isEnabled = MissionControlDirectSettings.enabled
-    }
-
-    @objc private func togglePairSingleSession() {
-        guard MissionControlDirectSettings.enabled else { return }
-        MissionControlPairSingleSessionSettings.enabled.toggle()
-        if MissionControlPairSingleSessionSettings.enabled {
-            MissionControlPairHybridSettings.enabled = false
-            pairHybridItem?.state = .off
-        }
-        pairSingleSessionItem?.state =
-            MissionControlPairSingleSessionSettings.enabled ? .on : .off
-        SpaceSwitchDiagnostics.record(
-            "mc-pair-once setting enabled=\(MissionControlPairSingleSessionSettings.enabled)")
-    }
-
-    @objc private func togglePairHybrid() {
-        guard MissionControlDirectSettings.enabled else { return }
-        MissionControlPairHybridSettings.enabled.toggle()
-        if MissionControlPairHybridSettings.enabled {
-            // Never allow two experimental pair routes to be active together.
-            MissionControlPairSingleSessionSettings.enabled = false
-            pairSingleSessionItem?.state = .off
-        }
-        pairHybridItem?.state = MissionControlPairHybridSettings.enabled ? .on : .off
-        SpaceSwitchDiagnostics.record(
-            "pair-hybrid setting enabled=\(MissionControlPairHybridSettings.enabled)")
-    }
-
-@objc private func promptMissionControlCustomWait() {
+    @objc private func promptMissionControlCustomWait() {
         let alert = NSAlert()
         alert.messageText = "Mission Controlの待機時間"
         alert.informativeText = "100〜1000msの整数で入力してください。"
