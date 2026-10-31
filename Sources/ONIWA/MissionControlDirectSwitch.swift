@@ -265,12 +265,12 @@ enum MissionControlDirectSwitch {
                     "Mission Control表示中にSpace構成が変わったため中断しました。"))
             }
             func button(for target: SpaceEntry, group: DisplayGroup) -> AXUIElement? {
-                guard let (number, bounds) = physical(target),
+                guard let location = physical(target),
                       let index = group.spaces.firstIndex(where: {
                           $0.identity == target.identity
                       }) else { return nil }
                 let matches = candidates.filter {
-                    matchesDisplay($0.display, number: number, bounds: bounds)
+                    matchesDisplay($0.display, number: location.0, bounds: location.1)
                 }
                 guard matches.count == 1 else { return nil }
                 let buttons = children(of: matches[0].list).filter {
