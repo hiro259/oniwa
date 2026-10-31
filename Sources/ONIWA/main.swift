@@ -133,7 +133,15 @@ final class SearchState: ObservableObject {
             byKey[candidate.orderKey, default: []].append(candidate)
         }
         let useRecency = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return listOrder.orderedKeys(candidates.map(\.orderKey), useRecency: useRecency)
+        var names: [String: String] = [:]
+        for item in candidates {
+            switch item {
+            case .pair(let pair): names[item.orderKey] = pair.name
+            case .space(let space): names[item.orderKey] = spaceName(space)
+            }
+        }
+        return listOrder.orderedKeys(candidates.map(\.orderKey),
+                                     useRecency: useRecency, names: names)
             .compactMap { key in
                 guard var bucket = byKey[key], !bucket.isEmpty else { return nil }
                 let result = bucket.removeFirst()
@@ -143,6 +151,39 @@ final class SearchState: ObservableObject {
     }
 
     var allResultIDs: [String] { orderedItems.map(\.id) }
+
+    var sortMode: SpaceListSortMode { listOrder.sortMode }
+
+    var canReorderByDrag: Bool {
+        sortMode == .custom && query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func changeSortMode(_ mode: SpaceListSortMode) {
+        guard mode != listOrder.sortMode else { return }
+        // Seed the first custom order from the current full list, not a search
+        // subset. Preserve the previous custom layout when switching modes.
+        let entries: [SearchListItem] = pairStore.pairs.map { .pair($0) }
+            + all.map { .space($0) }
+        var names: [String: String] = [:]
+        for entry in entries {
+            switch entry {
+            case .pair(let pair): names[entry.orderKey] = pair.name
+            case .space(let space): names[entry.orderKey] = spaceName(space)
+            }
+        }
+        let seed = listOrder.orderedKeys(entries.map(\.orderKey), names: names)
+        listOrder.setSortMode(mode, visibleKeys: seed)
+        orderingRevision += 1
+    }
+
+    func reorderRow(from source: String, to destination: String) {
+        guard canReorderByDrag, !source.hasPrefix("transient:"),
+              !destination.hasPrefix("transient:") else { return }
+        let visibleKeys = orderedItems.map(\.orderKey)
+        if listOrder.moveCustom(source, to: destination, visibleKeys: visibleKeys) {
+            orderingRevision += 1
+        }
+    }
 
     func isPinned(_ pair: SpacePair) -> Bool {
         listOrder.isPinned(pairResultID(pair))
