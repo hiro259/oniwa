@@ -352,6 +352,12 @@ enum MissionControlDirectSwitch {
             + "別方式へ自動で切り替えません。"))
     }
 
+    /// A mixed pair must not send keyboard shortcuts while MC thumbnails
+    /// are still active. An accepted AXPress does not prove the overlay closed.
+    static func hasVisibleThumbnailLists() -> Bool {
+        !candidateDisplayLists().isEmpty
+    }
+
     private static func openMissionControl() -> Bool {
         let paths = ["/System/Applications/Mission Control.app",
                      "/System/Library/CoreServices/Mission Control.app"]
