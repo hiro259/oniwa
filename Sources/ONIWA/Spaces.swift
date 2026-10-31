@@ -173,6 +173,14 @@ final class SpaceSwitcher {
                 "セット内のSpaceが見つかりません。別のSpaceに置き換えず、セットを編集してください。"))
         }
 
+        // Mixed pair route preserves the established direct/direct method
+        // below. First switch the built-in display by Mission Control, then
+        // the physical external display with verified ordinary keyboard steps.
+        if MissionControlDirectSettings.enabled
+            && MissionControlPairHybridSettings.enabled {
+            return performPairHybrid(pair, before: before)
+        }
+
         // Opt-in experiment only. The established two-session path below
         // stays intact for ordinary users and as a manual fallback.
         if MissionControlDirectSettings.enabled
@@ -272,6 +280,173 @@ final class SpaceSwitcher {
                 + "別のSpaceへ変わりました。診断ログを確認してください。"))
         }
         SpaceSwitchDiagnostics.record("pair complete confirmed")
+        return .success(())
+    }
+
+    /// Experimental mixed-mode pair switch. It MUST not depend on the
+    /// ordering of SpacePair.first/second: resolve actual physical displays.
+    /// When an internal display is unavailable (clamshell/external-only),
+    /// fail safely instead of guessing where Ctrl+Arrow will be routed.
+    private func performPairHybrid(
+        _ pair: SpacePair, before: [DisplayGroup]
+    ) -> Result<Void, Error> {
+        let reader = SpaceReader.shared
+        guard before.allSatisfy({ $0.currentID != nil }) else {
+            return .failure(SwitchFailure(
+                "混合式：接続ディスプレイのSpace状態が不明なため中断しました。"))
+        }
+        // The same NSScreen->CGDisplay UUID mapping is used by the ordinary
+        // SpaceReader for every monitor. Do not derive roles from pair order
+        // or the first/second item of the live Space list.
+        var physicalRoles: [String: Bool] = [:]
+        for screen in NSScreen.screens {
+            guard let number = screen.deviceDescription[
+                NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+                  let uuidRef = CGDisplayCreateUUIDFromDisplayID(
+                    CGDirectDisplayID(number.uint32Value)) else {
+                SpaceSwitchDiagnostics.record("pair-hybrid abort: screen UUID unavailable")
+                return .failure(SwitchFailure(
+                    "混合式：物理ディスプレイの識別情報を取得できません。"))
+            }
+            let uuid = (CFUUIDCreateString(nil, uuidRef.takeRetainedValue()) as String)
+                .lowercased()
+            guard physicalRoles[uuid] == nil else {
+                return .failure(SwitchFailure(
+                    "混合式：ディスプレイの識別子が重複しています。"))
+            }
+            physicalRoles[uuid] = CGDisplayIsBuiltin(
+                CGDirectDisplayID(number.uint32Value)) != 0
+        }
+        guard let route = PairHybridRouting.resolve(
+            firstDisplayID: pair.first.displayID,
+            secondDisplayID: pair.second.displayID,
+            isBuiltInByDisplayID: physicalRoles),
+              let resolved = SpacePairResolver.resolve(
+                pair, in: before.flatMap(\.spaces).map(\.identity)),
+              let builtIn = before.flatMap(\.spaces).first(where: {
+                $0.displayID == route.builtInDisplayID
+                    && ($0.identity == resolved.0 || $0.identity == resolved.1)
+              }),
+              let external = before.flatMap(\.spaces).first(where: {
+                $0.displayID == route.externalDisplayID
+                    && ($0.identity == resolved.0 || $0.identity == resolved.1)
+              }),
+              let beforeBuiltIn = before.first(where: { $0.id == builtIn.displayID }),
+              let beforeExternal = before.first(where: { $0.id == external.displayID })
+        else {
+            SpaceSwitchDiagnostics.record("pair-hybrid abort: ambiguous physical roles or UUID")
+            return .failure(SwitchFailure(
+                "混合式は内蔵ディスプレイ1台＋拡張ディスプレイ1台のセットに対応しています。"
+                + "現在のディスプレイ構成では安全に識別できません。"))
+        }
+
+        let untouched = currentSpaceIDs(before.filter {
+            $0.id != builtIn.displayID && $0.id != external.displayID
+        })
+        SpaceSwitchDiagnostics.record(
+            "pair-hybrid start mc=\(SpaceSwitchDiagnostics.shortDisplay(builtIn.displayID)):"
+            + "\(builtIn.systemID) keyboard=\(SpaceSwitchDiagnostics.shortDisplay(external.displayID)):"
+            + "\(external.systemID) initial=\(traceLayout(before))")
+
+        if beforeBuiltIn.currentID != builtIn.systemID {
+            // Do not send an unrelated shortcut if the direct MC action
+            // fails, even when the other display was already correct.
+            switch performSwitch(builtIn) {
+            case .failure(let error):
+                SpaceSwitchDiagnostics.record(
+                    "pair-hybrid built-in failed: \(error.localizedDescription)")
+                return .failure(SwitchFailure(
+                    "混合式：内蔵ディスプレイのMission Control移動に失敗しました。"
+                    + "拡張ディスプレイは操作していません。\(error.localizedDescription)"))
+            case .success:
+                break
+            }
+        } else {
+            SpaceSwitchDiagnostics.record("pair-hybrid built-in skipped: already current")
+        }
+
+        let middle = reader.displays(includeAppNames: false)
+        SpaceSwitchDiagnostics.record("pair-hybrid after-mc \(traceLayout(middle))")
+        guard let livePair = SpacePairResolver.resolve(
+            pair, in: middle.flatMap(\.spaces).map(\.identity)),
+              middle.first(where: { $0.id == builtIn.displayID })?.currentID
+                == builtIn.systemID,
+              middle.first(where: { $0.id == external.displayID })?.currentID
+                == beforeExternal.currentID,
+              untouched.allSatisfy({ id, expectedID in
+                  middle.first(where: { $0.id == id })?.currentID == expectedID
+              }),
+              [livePair.0, livePair.1].contains(builtIn.identity),
+              [livePair.0, livePair.1].contains(external.identity)
+        else {
+            return .failure(SwitchFailure(
+                "混合式：内蔵ディスプレイの移動後にSpace構成か別画面の状態が変化しました。"
+                + "拡張ディスプレイは操作せず中断しました。"))
+        }
+
+        if middle.first(where: { $0.id == external.displayID })?.currentID
+            != external.systemID {
+            // Mission Control must be closed before sending Ctrl+Arrow.
+            // AXPress success alone does not prove its overlay is gone.
+            let deadline = ProcessInfo.processInfo.systemUptime + 0.8
+            while MissionControlDirectSwitch.hasVisibleThumbnailLists(),
+                  ProcessInfo.processInfo.systemUptime < deadline {
+                Thread.sleep(forTimeInterval: pollInterval)
+            }
+            guard !MissionControlDirectSwitch.hasVisibleThumbnailLists() else {
+                SpaceSwitchDiagnostics.record("pair-hybrid abort: Mission Control still visible")
+                return .failure(SwitchFailure(
+                    "混合式：Mission Controlがまだ開いています。"
+                    + "誤操作を避けるため拡張側のキー送信を中断しました。"))
+            }
+            // Forced keyboard path bypasses BOTH direct MC and the
+            // potentially unstable fast Dock swipe, regardless of global
+            // single-Space preferences.
+            switch performSwitch(external, forceKeyboard: true) {
+            case .failure(let error):
+                SpaceSwitchDiagnostics.record(
+                    "pair-hybrid external failed: \(error.localizedDescription)")
+                return .failure(SwitchFailure(
+                    "混合式：内蔵ディスプレイは移動済みですが、"
+                    + "拡張ディスプレイのキーボード移動に失敗しました。"
+                    + "自動ロールバックはしません。\(error.localizedDescription)"))
+            case .success:
+                break
+            }
+        } else {
+            SpaceSwitchDiagnostics.record("pair-hybrid external skipped: already current")
+        }
+
+        // Final comparison covers both requested Spaces and every unrelated
+        // display. A second sample >400ms detects delayed Space snap-backs.
+        let arrived = reader.displays(includeAppNames: false)
+        SpaceSwitchDiagnostics.record("pair-hybrid after-keyboard \(traceLayout(arrived))")
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        Thread.sleep(forTimeInterval: 0.85)
+        let settled = reader.displays(includeAppNames: false)
+        SpaceSwitchDiagnostics.record(
+            "pair-hybrid settled elapsedMs="
+            + "\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)) "
+            + "\(traceLayout(settled))")
+        for sample in [arrived, settled] {
+            guard let verifiedPair = SpacePairResolver.resolve(
+                pair, in: sample.flatMap(\.spaces).map(\.identity)),
+                  sample.first(where: { $0.id == builtIn.displayID })?.currentID
+                    == builtIn.systemID,
+                  sample.first(where: { $0.id == external.displayID })?.currentID
+                    == external.systemID,
+                  [verifiedPair.0, verifiedPair.1].contains(builtIn.identity),
+                  [verifiedPair.0, verifiedPair.1].contains(external.identity),
+                  untouched.allSatisfy({ id, oldSpace in
+                      sample.first(where: { $0.id == id })?.currentID == oldSpace
+                  }) else {
+                SpaceSwitchDiagnostics.record("pair-hybrid failed final verification")
+                return .failure(SwitchFailure(
+                    "混合式：切り替え後の2画面または他のモニターの状態が一致しません。"
+                    + "追加操作せず中断しました。"))
+            }
+        }
+        SpaceSwitchDiagnostics.record("pair-hybrid complete confirmed")
         return .success(())
     }
 
@@ -395,7 +570,8 @@ final class SpaceSwitcher {
         }.joined(separator: " ")
     }
 
-    private func performSwitch(_ target: SpaceEntry) -> Result<Void, Error> {
+    private func performSwitch(_ target: SpaceEntry,
+                               forceKeyboard: Bool = false) -> Result<Void, Error> {
         let reader = SpaceReader.shared
         let initialDisplays = reader.displays(includeAppNames: false)
         guard let initial = initialDisplays.first(where: { $0.id == target.displayID }),
@@ -436,7 +612,7 @@ final class SpaceSwitcher {
             return .success(())
         }
 
-        if MissionControlDirectSettings.enabled {
+        if MissionControlDirectSettings.enabled && !forceKeyboard {
             // To detect a real unintended switch, every other monitor needs a
             // known baseline before Mission Control is opened. The overlay may
             // temporarily report other IDs, but only the settled IDs are final.
@@ -579,13 +755,15 @@ final class SpaceSwitcher {
 
             switch decision {
             case .arrived:
-                return verifySettledTarget(target, reader: reader)
+                return verifySettledTarget(
+                    target, reader: reader,
+                    useInstant: InstantSwitchSettings.enabled && !forceKeyboard)
             case let .move(direction, nextSpaceID):
                 SpaceSwitchDiagnostics.record(
                     "step target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
                     + "from=\(current) to=\(nextSpaceID) "
                     + "direction=\(direction == .right ? "right" : "left") "
-                    + "mode=\(InstantSwitchSettings.enabled ? "instant-first" : "keyboard")")
+                    + "mode=\(InstantSwitchSettings.enabled && !forceKeyboard ? "instant-first" : "keyboard")")
                 guard let cursor = CGEvent(source: nil)?.location,
                       displayBounds.contains(cursor) else {
                     return .failure(SwitchFailure(
@@ -605,7 +783,7 @@ final class SpaceSwitcher {
                 // as proof of a switch. If no movement is observed, verify the
                 // live ID again before trying the existing Ctrl+arrow fallback.
                 // Unexpected movement is a hard stop, never another keypress.
-                if InstantSwitchSettings.enabled,
+                if InstantSwitchSettings.enabled && !forceKeyboard,
                    InstantSpaceGesture.post(right: direction == .right) {
                     switch waitForNeighbor(
                         previous: current, expected: nextSpaceID,
@@ -851,14 +1029,15 @@ final class SpaceSwitcher {
     /// changing. Also capture what ONIWA associates with each visible Space:
     /// an ID-confirmed switch cannot prove the selected label was correct.
     private func verifySettledTarget(_ target: SpaceEntry,
-                                     reader: SpaceReader) -> Result<Void, Error> {
+                                     reader: SpaceReader,
+                                     useInstant: Bool = false) -> Result<Void, Error> {
         // Observe beyond the documented/reproduced ~400 ms late Dock yank;
         // the SkyLight current ID can initially look correct.
         // Fast gestures can update the SkyLight current ID before Dock's
         // delayed app activation or a previous gesture finishes. Sample the
         // settling interval without changing the fast-path transition logic.
         // Ordinary keyboard switching retains its single 850ms readback.
-        let sampleTimes: [TimeInterval] = InstantSwitchSettings.enabled
+        let sampleTimes: [TimeInterval] = useInstant
             ? [0.15, 0.35, 0.60, 0.85] : [0.85]
         let startedAt = ProcessInfo.processInfo.systemUptime
         var live: [DisplayGroup] = []
@@ -866,7 +1045,7 @@ final class SpaceSwitcher {
             let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
             Thread.sleep(forTimeInterval: max(0, scheduledAt - elapsed))
             live = reader.displays(includeAppNames: false)
-            if InstantSwitchSettings.enabled {
+            if useInstant {
                 let measuredMS = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
                 let current = live.first(where: { $0.id == target.displayID })?.currentID
                 SpaceSwitchDiagnostics.record(
