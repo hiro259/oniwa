@@ -135,4 +135,20 @@ final class SpaceListOrderTests: XCTestCase {
                        ["stable-b", "stable-a", runtime])
     }
 
+    func testLiveHoverSwapsRowsProgressivelyAndPersistsFinalOrder() {
+        let defaults = defaults()
+        let order = SpaceListOrderStore(defaults: defaults)
+        let keys = ["a", "b", "c", "d"]
+        order.setSortMode(.custom, visibleKeys: keys)
+        XCTAssertTrue(order.moveCustom("a", to: "b", visibleKeys: keys))
+        XCTAssertEqual(order.orderedKeys(keys), ["b", "a", "c", "d"])
+        XCTAssertTrue(order.moveCustom("a", to: "c", visibleKeys: keys))
+        XCTAssertEqual(order.orderedKeys(keys), ["b", "c", "a", "d"])
+        XCTAssertTrue(order.moveCustom("a", to: "d", visibleKeys: keys))
+        XCTAssertEqual(order.orderedKeys(keys), ["b", "c", "d", "a"])
+
+        let restarted = SpaceListOrderStore(defaults: defaults)
+        XCTAssertEqual(restarted.orderedKeys(keys), ["b", "c", "d", "a"])
+    }
+
 }
