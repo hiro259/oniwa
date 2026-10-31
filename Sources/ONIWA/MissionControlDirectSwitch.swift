@@ -39,6 +39,19 @@ enum MissionControlDirectSettings {
     }
 }
 
+/// Experimental mixed mode for two-display Space sets:
+/// built-in Mac display: Mission Control AX direct selection;
+/// external display: ordinary Control+Arrow navigation.
+/// OFF by default; ordinary sequential Mission Control stays available.
+enum MissionControlPairHybridSettings {
+    private static let key = "oniwa.missionControlPairHybridExperimental"
+
+    static var enabled: Bool {
+        get { UserDefaults.standard.bool(forKey: key) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+}
+
 /// Explicit opt-in: try pressing both displays' prepared AX thumbnails
 /// in one Mission Control session. The established sequential route stays the
 /// default and no automatic fallback is attempted after a partial press.
