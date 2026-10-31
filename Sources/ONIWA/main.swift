@@ -126,12 +126,20 @@ final class SearchState: ObservableObject {
         _ = orderingRevision
         let candidates: [SearchListItem] =
             pairResults.map { .pair($0) } + results.map { .space($0) }
-        let byKey = Dictionary(uniqueKeysWithValues: candidates.map {
-            ($0.orderKey, $0)
-        })
+        // On malformed/duplicate UUIDs, do not crash constructing a
+        // dictionary. Preserve every candidate and its original relative order.
+        var byKey: [String: [SearchListItem]] = [:]
+        for candidate in candidates {
+            byKey[candidate.orderKey, default: []].append(candidate)
+        }
         let useRecency = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return listOrder.orderedKeys(candidates.map(\.orderKey), useRecency: useRecency)
-            .compactMap { byKey[$0] }
+            .compactMap { key in
+                guard var bucket = byKey[key], !bucket.isEmpty else { return nil }
+                let result = bucket.removeFirst()
+                byKey[key] = bucket
+                return result
+            }
     }
 
     var allResultIDs: [String] { orderedItems.map(\.id) }
