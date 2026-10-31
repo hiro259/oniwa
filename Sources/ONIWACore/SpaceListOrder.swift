@@ -89,7 +89,9 @@ public final class SpaceListOrderStore {
     /// The first entry into custom mode starts from the currently shown order.
     public func setSortMode(_ mode: SpaceListSortMode, visibleKeys: [String]) {
         if mode == .custom && customOrder.isEmpty {
-            customOrder = Self.deduplicated(visibleKeys)
+            // Missing-UUID Spaces have only runtime IDs: never persist them.
+            customOrder = Self.deduplicated(
+                visibleKeys.filter { !$0.hasPrefix("transient:") })
         }
         sortMode = mode
         persist()
@@ -102,6 +104,7 @@ public final class SpaceListOrderStore {
     public func moveCustom(_ source: String, to target: String,
                            visibleKeys: [String]) -> Bool {
         guard sortMode == .custom, source != target, !source.isEmpty, !target.isEmpty,
+              !source.hasPrefix("transient:"), !target.hasPrefix("transient:"),
               visibleKeys.contains(source), visibleKeys.contains(target) else { return false }
         let sourcePinned = isPinned(source)
         guard sourcePinned == isPinned(target) else { return false }
@@ -109,7 +112,8 @@ public final class SpaceListOrderStore {
             guard Self.move(source, to: target, in: &pinned) else { return false }
         } else {
             // Preserve hidden/disconnected keys already in the custom layout.
-            for key in visibleKeys where !customOrder.contains(key) {
+            for key in visibleKeys
+                where !key.hasPrefix("transient:") && !customOrder.contains(key) {
                 customOrder.append(key)
             }
             guard Self.move(source, to: target, in: &customOrder) else { return false }
