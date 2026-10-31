@@ -1041,6 +1041,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var instantSwitchItem: NSMenuItem?
     private var instantPacingItem: NSMenuItem?
     private var directSwitchItem: NSMenuItem?
+    private var pairSingleSessionItem: NSMenuItem?
     private var missionControlWaitRootItem: NSMenuItem?
     private var missionControlResetWaitItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
@@ -1111,6 +1112,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         direct.target = self
         directSwitchItem = direct
         menu.addItem(direct)
+        let pairOnce = NSMenuItem(
+            title: "2画面セット：Mission Control一回（試験的）",
+            action: #selector(togglePairSingleSession), keyEquivalent: "")
+        pairOnce.toolTip = "2画面のサムネイルを1回のMission Control表示で操作する実験です。"
+            + "失敗しても自動再試行しません。通常の2回方式は設定OFFで維持できます。"
+        pairOnce.state = MissionControlPairSingleSessionSettings.enabled ? .on : .off
+        pairOnce.target = self
+        pairSingleSessionItem = pairOnce
+        pairOnce.isEnabled = MissionControlDirectSettings.enabled
+        menu.addItem(pairOnce)
         let waitRoot = NSMenuItem(title: "Mission Control待機時間：300ms（推奨）",
                                   action: nil, keyEquivalent: "")
         waitRoot.toolTip = "Spaceサムネイルを検出した後の追加待機時間です。"
@@ -1169,6 +1180,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // menus while direct selection takes precedence.
         instantSwitchItem?.isEnabled = !MissionControlDirectSettings.enabled
         instantPacingItem?.isEnabled = !MissionControlDirectSettings.enabled
+        pairSingleSessionItem?.isEnabled = MissionControlDirectSettings.enabled
+    }
+
+    @objc private func togglePairSingleSession() {
+        guard MissionControlDirectSettings.enabled else { return }
+        MissionControlPairSingleSessionSettings.enabled.toggle()
+        pairSingleSessionItem?.state =
+            MissionControlPairSingleSessionSettings.enabled ? .on : .off
+        SpaceSwitchDiagnostics.record(
+            "mc-pair-once setting enabled=\(MissionControlPairSingleSessionSettings.enabled)")
     }
 
 @objc private func promptMissionControlCustomWait() {
