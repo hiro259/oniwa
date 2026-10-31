@@ -67,4 +67,58 @@ final class SpaceListOrderTests: XCTestCase {
         XCTAssertEqual(a.persistentKey, b.persistentKey)
         XCTAssertNotEqual(a.persistentKey, other.persistentKey)
     }
+    func testOriginalAndNameModesWithPinnedPriority() {
+        let order = SpaceListOrderStore(defaults: defaults())
+        let keys = ["b", "c", "a"]
+        order.markUsed("c")
+        order.setSortMode(.original, visibleKeys: keys)
+        XCTAssertEqual(order.orderedKeys(keys), ["b", "c", "a"])
+        order.setSortMode(.name, visibleKeys: keys)
+        XCTAssertEqual(order.orderedKeys(keys, names: [
+            "a": "Alps", "b": "Zebra", "c": "cafe"
+        ]), ["a", "c", "b"])
+        order.togglePin("b")
+        XCTAssertEqual(order.orderedKeys(keys, names: [
+            "a": "Alps", "b": "Zebra", "c": "cafe"
+        ]), ["b", "a", "c"])
+    }
+
+    func testManualDragPersistenceAndPinBoundaries() {
+        let defaults = defaults()
+        let order = SpaceListOrderStore(defaults: defaults)
+        let keys = ["pair", "a", "b", "c"]
+        order.togglePin("pair")
+        order.setSortMode(.custom, visibleKeys: keys)
+        XCTAssertEqual(order.orderedKeys(keys), keys)
+        XCTAssertTrue(order.moveCustom("a", to: "c", visibleKeys: keys))
+        XCTAssertEqual(order.orderedKeys(keys), ["pair", "b", "c", "a"])
+        XCTAssertFalse(order.moveCustom("a", to: "pair", visibleKeys: keys))
+        XCTAssertEqual(order.orderedKeys(keys), ["pair", "b", "c", "a"])
+        let restarted = SpaceListOrderStore(defaults: defaults)
+        XCTAssertEqual(restarted.sortMode, .custom)
+        XCTAssertEqual(restarted.orderedKeys(keys), ["pair", "b", "c", "a"])
+        XCTAssertEqual(restarted.orderedKeys(["a", "c"], useRecency: false),
+                       ["a", "c"])
+    }
+
+    func testCustomModePreservesManualOrderAcrossOtherModesAndNewItems() {
+        let order = SpaceListOrderStore(defaults: defaults())
+        order.setSortMode(.custom, visibleKeys: ["a", "b"])
+        XCTAssertTrue(order.moveCustom("b", to: "a", visibleKeys: ["a", "b"]))
+        order.setSortMode(.recent, visibleKeys: ["a", "b"])
+        order.markUsed("a")
+        order.setSortMode(.custom, visibleKeys: ["a", "b", "c"])
+        XCTAssertEqual(order.orderedKeys(["a", "b", "c"]), ["b", "a", "c"])
+    }
+
+    func testLegacySnapshotDecodesWithoutLosingPins() throws {
+        let defaults = defaults()
+        let data = Data(#"{"pinned":["a"],"recent":["b"]}"#.utf8)
+        defaults.set(data, forKey: "oniwa.spaceListOrder.v1")
+        let order = SpaceListOrderStore(defaults: defaults)
+        XCTAssertEqual(order.sortMode, .recent)
+        XCTAssertTrue(order.isPinned("a"))
+        XCTAssertEqual(order.orderedKeys(["b", "a"]), ["a", "b"])
+    }
+
 }
