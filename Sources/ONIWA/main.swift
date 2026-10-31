@@ -523,7 +523,9 @@ struct SearchView: View {
             ScrollViewReader { scroll in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 3) {
-                    ForEach(state.pairResults) { pair in
+                    ForEach(state.orderedItems) { item in
+                        switch item {
+                        case .pair(let pair):
                         let destination = state.resolvedSpaces(for: pair)
                         let isCurrent = destination.map { $0.0.isCurrent && $0.1.isCurrent } ?? false
                         HStack(spacing: 9) {
@@ -562,6 +564,17 @@ struct SearchView: View {
                             }
                             Spacer()
                             Button {
+                                state.togglePin(pair)
+                            } label: {
+                                Image(systemName: state.isPinned(pair) ? "pin.fill" : "pin")
+                                    .foregroundStyle(state.isPinned(pair)
+                                        ? Color.accentColor : Color.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .help(state.isPinned(pair) ? "ピン留めを解除" : "一覧の先頭にピン留め")
+                            .accessibilityLabel(state.isPinned(pair)
+                                ? "セットのピン留めを解除" : "セットをピン留め")
+                            Button {
                                 state.beginPairEdit(pair)
                             } label: {
                                 Image(systemName: "pencil")
@@ -589,8 +602,7 @@ struct SearchView: View {
                             }
                         }
                         .id(state.pairResultID(pair))
-                    }
-                    ForEach(state.results) { space in
+                        case .space(let space):
                         HStack(spacing: 9) {
                             Image(systemName: space.kind == 4 ? "arrow.up.left.and.arrow.down.right" : "display")
                                 .foregroundStyle(.secondary)
@@ -641,6 +653,20 @@ struct SearchView: View {
                             }
                             Spacer()
                             Button {
+                                state.togglePin(space)
+                            } label: {
+                                Image(systemName: state.isPinned(space) ? "pin.fill" : "pin")
+                                    .foregroundStyle(state.isPinned(space)
+                                        ? Color.accentColor : Color.secondary)
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(space.identity.persistentKey == nil)
+                            .help(space.identity.persistentKey == nil
+                                ? "UUIDのないSpaceは再起動後のピン留めを保存できません"
+                                : (state.isPinned(space) ? "ピン留めを解除" : "一覧の先頭にピン留め"))
+                            .accessibilityLabel(state.isPinned(space)
+                                ? "Spaceのピン留めを解除" : "Spaceをピン留め")
+                            Button {
                                 state.beginEdit(space)
                             } label: {
                                 Image(systemName: "pencil")
@@ -668,6 +694,7 @@ struct SearchView: View {
                             else { state.selectedID = space.id }
                         }
                         .id(space.id)
+                        }
                     }
                 }
                 }
@@ -696,6 +723,11 @@ struct SearchView: View {
         .frame(width: 500, height: 420)
         .onAppear { isSearchFocused = true }
         .onChange(of: state.query) { _ in state.selectedID = state.allResultIDs.first }
+        .onChange(of: state.orderingRevision) { _ in
+            if !state.allResultIDs.contains(state.selectedID ?? "") {
+                state.selectedID = state.allResultIDs.first
+            }
+        }
         .onChange(of: state.labelRevision) { _ in
             if !state.allResultIDs.contains(state.selectedID ?? "") {
                 state.selectedID = state.allResultIDs.first
