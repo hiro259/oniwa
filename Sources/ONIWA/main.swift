@@ -762,6 +762,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var instantSwitchItem: NSMenuItem?
     private var instantPacingItem: NSMenuItem?
     private var directSwitchItem: NSMenuItem?
+    private var missionControlWaitItems: [Int: NSMenuItem] = [:]
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -821,6 +822,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         direct.target = self
         directSwitchItem = direct
         menu.addItem(direct)
+        let waitRoot = NSMenuItem(title: "Mission Control待機時間（試験的）",
+                                  action: nil, keyEquivalent: "")
+        waitRoot.toolTip = "サムネイル一覧を検出した後の追加待機時間です。"
+            + "Mission Controlが表示される総時間ではありません。短い設定は誤動作する可能性があります。"
+        let waitMenu = NSMenu(title: "Mission Control待機時間")
+        for milliseconds in MissionControlDirectSettings.readinessWaitOptions {
+            let title = milliseconds == 300 ? "300ms（安定確認済み）" : "\(milliseconds)ms"
+            let option = NSMenuItem(title: title,
+                                    action: #selector(selectMissionControlWait(_:)),
+                                    keyEquivalent: "")
+            option.target = self
+            option.representedObject = milliseconds
+            option.state = milliseconds == MissionControlDirectSettings.readinessWaitMilliseconds
+                ? .on : .off
+            missionControlWaitItems[milliseconds] = option
+            waitMenu.addItem(option)
+        }
+        waitRoot.submenu = waitMenu
+        menu.addItem(waitRoot)
         let diagnosis = NSMenuItem(title: "ショートカット診断…",
                                    action: #selector(showShortcutDiagnosis),
                                    keyEquivalent: "")
@@ -859,6 +879,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // menus while direct selection takes precedence.
         instantSwitchItem?.isEnabled = !MissionControlDirectSettings.enabled
         instantPacingItem?.isEnabled = !MissionControlDirectSettings.enabled
+    }
+
+    @objc private func selectMissionControlWait(_ sender: NSMenuItem) {
+        guard let milliseconds = sender.representedObject as? Int,
+              MissionControlDirectSettings.readinessWaitOptions.contains(milliseconds) else {
+            return
+        }
+        MissionControlDirectSettings.readinessWaitMilliseconds = milliseconds
+        for (value, item) in missionControlWaitItems {
+            item.state = value == milliseconds ? .on : .off
+        }
     }
 
     @objc private func changeShortcut(_ sender: NSMenuItem) {
