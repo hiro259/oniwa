@@ -6,7 +6,7 @@ import ONIWACore
 
 /// A single visible list can interleave named sets and individual Spaces.
 /// Space persistence uses the monitor-scoped UUID, never its shifting index.
-private enum SearchListItem: Identifiable {
+enum SearchListItem: Identifiable {
     case pair(SpacePair)
     case space(SpaceEntry)
 
