@@ -9,6 +9,14 @@ enum MissionControlDirectSettings {
     static let readinessWaitKey = "oniwa.missionControlReadinessWaitMilliseconds"
     static let readinessWaitOptions = [300, 250, 200, 150, 100]
     static let defaultReadinessWaitMilliseconds = 300
+    // 100ms is experimental; cap custom values so the AX readiness timeout
+    // is not accidentally exceeded by a very large saved value.
+    static let minimumReadinessWaitMilliseconds = 100
+    static let maximumReadinessWaitMilliseconds = 1_000
+
+    static func isValidReadinessWait(_ value: Int) -> Bool {
+        (minimumReadinessWaitMilliseconds...maximumReadinessWaitMilliseconds).contains(value)
+    }
 
     static var enabled: Bool {
         get { UserDefaults.standard.bool(forKey: key) }
@@ -20,13 +28,13 @@ enum MissionControlDirectSettings {
     static var readinessWaitMilliseconds: Int {
         get {
             guard let value = UserDefaults.standard.object(forKey: readinessWaitKey) as? Int,
-                  readinessWaitOptions.contains(value) else {
+                  isValidReadinessWait(value) else {
                 return defaultReadinessWaitMilliseconds
             }
             return value
         }
         set {
-            guard readinessWaitOptions.contains(newValue) else { return }
+            guard isValidReadinessWait(newValue) else { return }
             UserDefaults.standard.set(newValue, forKey: readinessWaitKey)
         }
     }
