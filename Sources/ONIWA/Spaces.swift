@@ -173,20 +173,15 @@ final class SpaceSwitcher {
                 "セット内のSpaceが見つかりません。別のSpaceに置き換えず、セットを編集してください。"))
         }
 
-        // Mixed pair route preserves the established direct/direct method
-        // below. First switch the built-in display by Mission Control, then
-        // the physical external display with verified ordinary keyboard steps.
-        if MissionControlDirectSettings.enabled
-            && MissionControlPairHybridSettings.enabled {
+        let pairMode = SwitchModeSettings.pair
+        SpaceSwitchDiagnostics.record("pair selected-mode=\(pairMode.rawValue)")
+        if pairMode == .hybrid {
             return performPairHybrid(pair, before: before)
         }
-
-        // Opt-in experiment only. The established two-session path below
-        // stays intact for ordinary users and as a manual fallback.
-        if MissionControlDirectSettings.enabled
-            && MissionControlPairSingleSessionSettings.enabled {
-            return performPairSingleSession(pair, before: before)
-        }
+        // Keyboard mode never inherits the legacy fast Dock gesture flag.
+        // MC-twice mode uses direct thumbnail selection for both displays.
+        let individualMode: SingleSpaceSwitchMode =
+            pairMode == .missionControlTwice ? .missionControl : .keyboard
 
         // Snapshot unrelated displays so we can detect an unintended change.
         var untouched: [String: UInt64] = [:]
@@ -195,7 +190,7 @@ final class SpaceSwitcher {
             if let current = display.currentID { untouched[display.id] = current }
         }
 
-        switch performSwitch(first) {
+        switch performSwitch(first, preferredMode: individualMode) {
         case .failure(let error):
             SpaceSwitchDiagnostics.record("pair first failed \(error.localizedDescription)")
             return .failure(SwitchFailure(
@@ -228,7 +223,7 @@ final class SpaceSwitcher {
                 + " space=\(second.systemID)"
                 + " uuid=\(String(second.identity.uuid?.prefix(8) ?? "unknown"))")
         }
-        switch performSwitch(second) {
+        switch performSwitch(second, preferredMode: individualMode) {
         case .failure(let error):
             SpaceSwitchDiagnostics.record("pair second failed \(error.localizedDescription)")
             return .failure(SwitchFailure(
@@ -351,7 +346,7 @@ final class SpaceSwitcher {
         if beforeBuiltIn.currentID != builtIn.systemID {
             // Do not send an unrelated shortcut if the direct MC action
             // fails, even when the other display was already correct.
-            switch performSwitch(builtIn) {
+            switch performSwitch(builtIn, preferredMode: .missionControl) {
             case .failure(let error):
                 SpaceSwitchDiagnostics.record(
                     "pair-hybrid built-in failed: \(error.localizedDescription)")
@@ -402,7 +397,7 @@ final class SpaceSwitcher {
             // Forced keyboard path bypasses BOTH direct MC and the
             // potentially unstable fast Dock swipe, regardless of global
             // single-Space preferences.
-            switch performSwitch(external, forceKeyboard: true) {
+            switch performSwitch(external, preferredMode: .keyboard) {
             case .failure(let error):
                 SpaceSwitchDiagnostics.record(
                     "pair-hybrid external failed: \(error.localizedDescription)")
@@ -571,7 +566,10 @@ final class SpaceSwitcher {
     }
 
     private func performSwitch(_ target: SpaceEntry,
-                               forceKeyboard: Bool = false) -> Result<Void, Error> {
+                               preferredMode: SingleSpaceSwitchMode? = nil) -> Result<Void, Error> {
+        let mode = preferredMode ?? SwitchModeSettings.single
+        SpaceSwitchDiagnostics.record("single selected-mode=\(mode.rawValue)"
+            + " target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))")
         let reader = SpaceReader.shared
         let initialDisplays = reader.displays(includeAppNames: false)
         guard let initial = initialDisplays.first(where: { $0.id == target.displayID }),
@@ -612,7 +610,7 @@ final class SpaceSwitcher {
             return .success(())
         }
 
-        if MissionControlDirectSettings.enabled && !forceKeyboard {
+        if mode == .missionControl {
             // To detect a real unintended switch, every other monitor needs a
             // known baseline before Mission Control is opened. The overlay may
             // temporarily report other IDs, but only the settled IDs are final.
@@ -757,13 +755,13 @@ final class SpaceSwitcher {
             case .arrived:
                 return verifySettledTarget(
                     target, reader: reader,
-                    useInstant: InstantSwitchSettings.enabled && !forceKeyboard)
+                    useInstant: mode == .instant)
             case let .move(direction, nextSpaceID):
                 SpaceSwitchDiagnostics.record(
                     "step target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
                     + "from=\(current) to=\(nextSpaceID) "
                     + "direction=\(direction == .right ? "right" : "left") "
-                    + "mode=\(InstantSwitchSettings.enabled && !forceKeyboard ? "instant-first" : "keyboard")")
+                    + "mode=\(mode == .instant ? "instant-first" : "keyboard")")
                 guard let cursor = CGEvent(source: nil)?.location,
                       displayBounds.contains(cursor) else {
                     return .failure(SwitchFailure(
@@ -783,7 +781,7 @@ final class SpaceSwitcher {
                 // as proof of a switch. If no movement is observed, verify the
                 // live ID again before trying the existing Ctrl+arrow fallback.
                 // Unexpected movement is a hard stop, never another keypress.
-                if InstantSwitchSettings.enabled && !forceKeyboard,
+                if mode == .instant,
                    InstantSpaceGesture.post(right: direction == .right) {
                     switch waitForNeighbor(
                         previous: current, expected: nextSpaceID,
