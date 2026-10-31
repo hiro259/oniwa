@@ -886,6 +886,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var keyboardMonitor: Any?
     private var spaceEventObserver: SpaceWorkspaceEventObserver?
+    private var spaceChangeObserverToken: NSObjectProtocol?
     private var instantSwitchItem: NSMenuItem?
     private var instantPacingItem: NSMenuItem?
     private var directSwitchItem: NSMenuItem?
@@ -896,6 +897,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         spaceEventObserver = SpaceWorkspaceEventObserver()
+        state.observeCurrentSpaces()
+        spaceChangeObserverToken = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            // Observe system-initiated Mission Control / keyboard switches too.
+            // Do not infer recency from search opening alone.
+            DispatchQueue.main.async { self?.state.observeCurrentSpaces() }
+        }
         installKeyboardNavigation()
         let shortcut = GlobalShortcut()
         shortcut.onPress = { [weak self] in self?.togglePanel() }
@@ -1198,6 +1208,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        if let spaceChangeObserverToken {
+            NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserverToken)
+            self.spaceChangeObserverToken = nil
+        }
         if let keyboardMonitor {
             NSEvent.removeMonitor(keyboardMonitor)
             self.keyboardMonitor = nil
