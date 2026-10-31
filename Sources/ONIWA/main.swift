@@ -4,6 +4,28 @@ import Carbon.HIToolbox
 import CoreGraphics
 import ONIWACore
 
+/// A single visible list can interleave named sets and individual Spaces.
+/// Space persistence uses the monitor-scoped UUID, never its shifting index.
+private enum SearchListItem: Identifiable {
+    case pair(SpacePair)
+    case space(SpaceEntry)
+
+    var id: String {
+        switch self {
+        case .pair(let pair): return "pair:\(pair.id.uuidString)"
+        case .space(let space): return space.id
+        }
+    }
+
+    var orderKey: String {
+        switch self {
+        case .pair(let pair): return "pair:\(pair.id.uuidString)"
+        case .space(let space):
+            return space.identity.persistentKey ?? "transient:\(space.id)"
+        }
+    }
+}
+
 @MainActor
 final class SearchState: ObservableObject {
     @Published var query = ""
@@ -22,6 +44,7 @@ final class SearchState: ObservableObject {
     @Published var isSwitching = false
     @Published var shortcutDescription = "⌥ Space"
     @Published var pairRevision = 0
+    @Published var orderingRevision = 0
     @Published var pairEditing = false
     @Published var pairNameDraft = ""
     @Published var pairFirstKey = ""
@@ -29,6 +52,9 @@ final class SearchState: ObservableObject {
     @Published var editingPairID: UUID?
     let labels = SpaceLabelStore()
     let pairStore = SpacePairStore()
+    let listOrder = SpaceListOrderStore()
+    private var lastCurrentIDs: [String: UInt64] = [:]
+    private var hasCurrentSnapshot = false
     private var editingIdentity: SpaceIdentity?
     let switcher = SpaceSwitcher()
     var hidePanel: (() -> Void)?
@@ -93,8 +119,64 @@ final class SearchState: ObservableObject {
         }
     }
 
-    var allResultIDs: [String] {
-        pairResults.map { pairResultID($0) } + results.map(\.id)
+    /// On an empty query: pinned first in the order they were pinned, then
+    /// recently-used items. During a query, pins remain first and fuzzy rank
+    /// is retained for other matches.
+    var orderedItems: [SearchListItem] {
+        _ = orderingRevision
+        let candidates: [SearchListItem] =
+            pairResults.map { .pair($0) } + results.map { .space($0) }
+        let byKey = Dictionary(uniqueKeysWithValues: candidates.map {
+            ($0.orderKey, $0)
+        })
+        let useRecency = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return listOrder.orderedKeys(candidates.map(\.orderKey), useRecency: useRecency)
+            .compactMap { byKey[$0] }
+    }
+
+    var allResultIDs: [String] { orderedItems.map(\.id) }
+
+    func isPinned(_ pair: SpacePair) -> Bool {
+        listOrder.isPinned(pairResultID(pair))
+    }
+
+    func isPinned(_ space: SpaceEntry) -> Bool {
+        guard let key = space.identity.persistentKey else { return false }
+        return listOrder.isPinned(key)
+    }
+
+    func togglePin(_ pair: SpacePair) {
+        listOrder.togglePin(pairResultID(pair))
+        orderingRevision += 1
+    }
+
+    func togglePin(_ space: SpaceEntry) {
+        guard let key = space.identity.persistentKey else { return }
+        listOrder.togglePin(key)
+        orderingRevision += 1
+    }
+
+    /// Track manual macOS Mission Control/keyboard switches too, not just
+    /// ONIWA-initiated transitions. The first snapshot is only a baseline.
+    func observeCurrentSpaces(_ snapshot: [DisplayGroup]? = nil) {
+        let live = snapshot ?? SpaceReader.shared.displays(includeAppNames: false)
+        guard !live.isEmpty else { return }
+        var changed = false
+        for group in live {
+            guard let current = group.currentID else { continue }
+            if hasCurrentSnapshot, lastCurrentIDs[group.id] != nil,
+               lastCurrentIDs[group.id] != current,
+               let space = group.spaces.first(where: { $0.systemID == current }),
+               let key = space.identity.persistentKey {
+                listOrder.markUsed(key)
+                changed = true
+            }
+        }
+        lastCurrentIDs = Dictionary(uniqueKeysWithValues: live.compactMap { group in
+            group.currentID.map { (group.id, $0) }
+        })
+        hasCurrentSnapshot = true
+        if changed { orderingRevision += 1 }
     }
 
     var pairEligibleSpaces: [SpaceEntry] {
@@ -188,7 +270,9 @@ final class SearchState: ObservableObject {
     func deletePair() {
         if let id = editingPairID {
             pairStore.delete(id: id)
+            listOrder.remove("pair:\(id.uuidString)")
             pairRevision += 1
+            orderingRevision += 1
         }
         pairEditing = false
         editingPairID = nil
@@ -213,7 +297,11 @@ final class SearchState: ObservableObject {
         switcher.switchToPair(pair) { [weak self] outcome in
             guard let self else { return }
             self.isSwitching = false
-            if case .failure(let error) = outcome {
+            switch outcome {
+            case .success:
+                self.listOrder.markUsed(self.pairResultID(pair))
+                self.orderingRevision += 1
+            case .failure(let error):
                 self.errorMessage = error.localizedDescription
                 self.showError()
             }
@@ -222,6 +310,7 @@ final class SearchState: ObservableObject {
 
     func refresh() {
         groups = SpaceReader.shared.displays()
+        observeCurrentSpaces(groups)
         if !groups.isEmpty { labels.reconcile(groups.flatMap(\.spaces).map(\.identity)) }
         errorMessage = SpaceReader.shared.available
             ? (groups.isEmpty ? "No Spaces found. This macOS version may be unsupported." : nil)
@@ -371,7 +460,13 @@ final class SearchState: ObservableObject {
         switcher.switchTo(space) { [weak self] outcome in
             guard let self else { return }
             self.isSwitching = false
-            if case .failure(let error) = outcome {
+            switch outcome {
+            case .success:
+                if let key = space.identity.persistentKey {
+                    self.listOrder.markUsed(key)
+                    self.orderingRevision += 1
+                }
+            case .failure(let error):
                 self.errorMessage = error.localizedDescription
                 self.showError()
             }
