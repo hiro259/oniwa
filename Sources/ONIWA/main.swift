@@ -1040,6 +1040,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var spaceChangeObserverToken: NSObjectProtocol?
     private var singleSwitchItems: [SingleSpaceSwitchMode: NSMenuItem] = [:]
     private var pairSwitchItems: [PairSpaceSwitchMode: NSMenuItem] = [:]
+    private var singleSwitchRootItem: NSMenuItem?
+    private var pairSwitchRootItem: NSMenuItem?
     private var instantPacingItem: NSMenuItem?
     private var missionControlWaitRootItem: NSMenuItem?
     private var missionControlResetWaitItem: NSMenuItem?
@@ -1089,8 +1091,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutRoot.submenu = shortcutMenu
         menu.addItem(shortcutRoot)
         // Radio-style groups: one active choice per group, persisted separately.
-        let singleRoot = NSMenuItem(title: "単独Spaceの切り替え",
-                                    action: nil, keyEquivalent: "")
+        let singleRoot = NSMenuItem(
+            title: "単独Space：\(singleModeSummary(SwitchModeSettings.single))",
+            action: nil, keyEquivalent: "")
+        singleSwitchRootItem = singleRoot
         let singleMenu = NSMenu(title: "単独Spaceの切り替え")
         let singleOptions: [(SingleSpaceSwitchMode, String)] = [
             (.keyboard, "キーボード移動"),
@@ -1110,8 +1114,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         singleRoot.submenu = singleMenu
         menu.addItem(singleRoot)
 
-        let pairRoot = NSMenuItem(title: "2画面セットの切り替え",
-                                  action: nil, keyEquivalent: "")
+        let pairRoot = NSMenuItem(
+            title: "2画面セット：\(pairModeSummary(SwitchModeSettings.pair))",
+            action: nil, keyEquivalent: "")
+        pairSwitchRootItem = pairRoot
         let pairMenu = NSMenu(title: "2画面セットの切り替え")
         let pairOptions: [(PairSpaceSwitchMode, String)] = [
             (.keyboard, "ディスプレイ移動式（キーボード）"),
@@ -1184,6 +1190,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
     }
 
+    private func singleModeSummary(_ mode: SingleSpaceSwitchMode) -> String {
+        switch mode {
+        case .keyboard: return "キーボード"
+        case .instant: return "瞬時切り替え"
+        case .missionControl: return "Mission Control直接"
+        }
+    }
+
+    private func pairModeSummary(_ mode: PairSpaceSwitchMode) -> String {
+        switch mode {
+        case .keyboard: return "キーボード"
+        case .hybrid: return "混合式"
+        case .missionControlTwice: return "Mission Control 2回"
+        }
+    }
+
     @objc private func selectSingleSwitchMode(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let selected = SingleSpaceSwitchMode(rawValue: raw) else { return }
@@ -1192,6 +1214,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.state = mode == selected ? .on : .off
         }
         instantPacingItem?.isEnabled = selected == .instant
+        singleSwitchRootItem?.title = "単独Space：\(singleModeSummary(selected))"
         SpaceSwitchDiagnostics.record("single mode setting=\(selected.rawValue)")
     }
 
@@ -1202,6 +1225,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for (mode, item) in pairSwitchItems {
             item.state = mode == selected ? .on : .off
         }
+        pairSwitchRootItem?.title = "2画面セット：\(pairModeSummary(selected))"
         SpaceSwitchDiagnostics.record("pair mode setting=\(selected.rawValue)")
     }
 
