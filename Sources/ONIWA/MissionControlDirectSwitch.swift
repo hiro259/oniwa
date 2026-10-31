@@ -39,6 +39,17 @@ enum MissionControlDirectSettings {
     }
 }
 
+/// Explicit opt-in: try pressing both displays' prepared AX thumbnails
+/// in one Mission Control session. The established sequential route stays the
+/// default and no automatic fallback is attempted after a partial press.
+enum MissionControlPairSingleSessionSettings {
+    private static let key = "oniwa.missionControlPairSingleSessionExperimental"
+    static var enabled: Bool {
+        get { UserDefaults.standard.bool(forKey: key) }
+        set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+}
+
 /// Experimental direct Space selection via Mission Control's AXPress action.
 ///
 /// See Hammerspoon hs.spaces.gotoSpace and Hammerspoon issue #3897:
@@ -181,6 +192,151 @@ enum MissionControlDirectSwitch {
         return .failure(DirectFailure(
             "Mission Control直接移動を安全に実行できませんでした（\(lastReason)）。"
             + " 必要ならEscapeキーでMission Controlを閉じてください。"))
+    }
+
+
+    /// Experimental: prepare thumbnails for both physical monitors from the
+    /// SAME Mission Control AX tree and press their known buttons consecutively.
+    /// AXPress of the first button may immediately dismiss Mission Control, so
+    /// the second press can fail. NEVER reopen Mission Control in this method;
+    /// the caller reports partial state and verifies both destinations later.
+    static func pressPairInOneSession(first: SpaceEntry, second: SpaceEntry,
+                                      reader: SpaceReader,
+                                      original: [DisplayGroup]) -> Result<Void, Error> {
+        guard AXIsProcessTrusted() else {
+            return .failure(DirectFailure("アクセシビリティの許可を確認してください。"))
+        }
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        guard version.majorVersion == 26 || version.majorVersion == 27 else {
+            return .failure(DirectFailure(
+                "Mission Control一回方式はmacOS 26/27のみ試験対応しています。"))
+        }
+        guard first.displayID != second.displayID,
+              let firstGroup = original.first(where: { $0.id == first.displayID }),
+              let secondGroup = original.first(where: { $0.id == second.displayID }),
+              firstGroup.spaces.filter({ $0.identity == first.identity }).count == 1,
+              secondGroup.spaces.filter({ $0.identity == second.identity }).count == 1 else {
+            return .failure(DirectFailure(
+                "セットの2つのSpaceとディスプレイを一意に特定できません。"))
+        }
+
+        let needsFirst = firstGroup.currentID != first.systemID
+        let needsSecond = secondGroup.currentID != second.systemID
+        if !needsFirst && !needsSecond { return .success(()) }
+
+        // Each participating display must be physically identified, not just
+        // inferred from a thumbnail index. Unchanged displays are not pressed.
+        func physical(_ target: SpaceEntry) -> (UInt32, CGRect)? {
+            guard let number = screenNumber(for: target.displayID),
+                  let bounds = reader.displayBounds(for: target.displayID) else { return nil }
+            return (number, bounds)
+        }
+        guard (!needsFirst || physical(first) != nil),
+              (!needsSecond || physical(second) != nil) else {
+            return .failure(DirectFailure("対象の物理ディスプレイを識別できません。"))
+        }
+        if candidateDisplayLists().isEmpty {
+            guard openMissionControl() else {
+                return .failure(DirectFailure("Mission Controlを開けませんでした。"))
+            }
+        }
+        SpaceSwitchDiagnostics.record(
+            "mc-pair-once start needsFirst=\(needsFirst) needsSecond=\(needsSecond)"
+            + " first=\(SpaceSwitchDiagnostics.shortDisplay(first.displayID)):\(first.systemID)"
+            + " second=\(SpaceSwitchDiagnostics.shortDisplay(second.displayID)):\(second.systemID)"
+        )
+
+        let deadline = ProcessInfo.processInfo.systemUptime + 2.5
+        let readiness = Double(MissionControlDirectSettings.readinessWaitMilliseconds) / 1_000
+        var readySince: TimeInterval?
+        var lastReason = "サムネイルの準備待ち"
+
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            let current = reader.displays(includeAppNames: false)
+            let candidates = candidateDisplayLists()
+            // Check that both target Spaces still exist with the same UUIDs
+            // and indices. A recreated or reordered Space must not be pressed.
+            guard let liveFirst = current.first(where: { $0.id == first.displayID }),
+                  let liveSecond = current.first(where: { $0.id == second.displayID }),
+                  liveFirst.spaces.map(\.identity) == firstGroup.spaces.map(\.identity),
+                  liveSecond.spaces.map(\.identity) == secondGroup.spaces.map(\.identity) else {
+                SpaceSwitchDiagnostics.record("mc-pair-once abort: Space membership/order changed")
+                return .failure(DirectFailure(
+                    "Mission Control表示中にSpace構成が変わったため中断しました。"))
+            }
+            func button(for target: SpaceEntry, group: DisplayGroup) -> AXUIElement? {
+                guard let (number, bounds) = physical(target),
+                      let index = group.spaces.firstIndex(where: {
+                          $0.identity == target.identity
+                      }) else { return nil }
+                let matches = candidates.filter {
+                    matchesDisplay($0.display, number: number, bounds: bounds)
+                }
+                guard matches.count == 1 else { return nil }
+                let buttons = children(of: matches[0].list).filter {
+                    stringAttribute($0, "AXRole") == "AXButton"
+                }
+                guard buttons.count == group.spaces.count,
+                      buttons.indices.contains(index) else { return nil }
+                return buttons[index]
+            }
+            let firstButton: AXUIElement? = needsFirst
+                ? button(for: first, group: liveFirst) : nil
+            let secondButton: AXUIElement? = needsSecond
+                ? button(for: second, group: liveSecond) : nil
+
+            guard (!needsFirst || firstButton != nil),
+                  (!needsSecond || secondButton != nil) else {
+                lastReason = "両画面のAXサムネイルを一意に対応付けられません"
+                readySince = nil
+                Thread.sleep(forTimeInterval: 0.06)
+                continue
+            }
+            let now = ProcessInfo.processInfo.systemUptime
+            if readySince == nil {
+                readySince = now
+                SpaceSwitchDiagnostics.record("mc-pair-once both-lists-ready")
+            }
+            guard let firstReady = readySince, now - firstReady >= readiness else {
+                Thread.sleep(forTimeInterval: 0.06)
+                continue
+            }
+
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-once ax-stable t=\(Int((now - firstReady) * 1000))ms"
+                + " configuredMs=\(MissionControlDirectSettings.readinessWaitMilliseconds)")
+            // Both AXUIElements are bound to a known display and index BEFORE
+            // the first action. Do not re-search by index after the first press
+            // or automatically open a second Mission Control session.
+            if let firstButton {
+                let action = AXUIElementPerformAction(
+                    firstButton, kAXPressAction as CFString)
+                SpaceSwitchDiagnostics.record(
+                    "mc-pair-once press-first error=\(action.rawValue)")
+                guard action == .success else {
+                    return .failure(DirectFailure(
+                        "1画面目の操作に失敗しました（AX \(action.rawValue)）。"
+                        + "自動再試行はしません。"))
+                }
+            }
+            if let secondButton {
+                let action = AXUIElementPerformAction(
+                    secondButton, kAXPressAction as CFString)
+                SpaceSwitchDiagnostics.record(
+                    "mc-pair-once press-second error=\(action.rawValue)")
+                guard action == .success else {
+                    return .failure(DirectFailure(
+                        "2画面目の操作に失敗しました（AX \(action.rawValue)）。"
+                        + "1画面目だけ移動している可能性があります。"
+                        + "追加操作は行いません。"))
+                }
+            }
+            return .success(())
+        }
+        SpaceSwitchDiagnostics.record("mc-pair-once abort: \(lastReason)")
+        return .failure(DirectFailure(
+            "Mission Control一回方式で準備できませんでした（\(lastReason)）。"
+            + "別方式へ自動で切り替えません。"))
     }
 
     private static func openMissionControl() -> Bool {
