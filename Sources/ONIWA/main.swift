@@ -763,6 +763,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var instantPacingItem: NSMenuItem?
     private var directSwitchItem: NSMenuItem?
     private var missionControlWaitItems: [Int: NSMenuItem] = [:]
+    private var missionControlCustomWaitItem: NSMenuItem?
+    private var missionControlResetWaitItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -828,19 +830,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + "Mission Controlが表示される総時間ではありません。短い設定は誤動作する可能性があります。"
         let waitMenu = NSMenu(title: "Mission Control待機時間")
         for milliseconds in MissionControlDirectSettings.readinessWaitOptions {
-            let title = milliseconds == 300 ? "300ms（安定確認済み）" : "\(milliseconds)ms"
+            let title = milliseconds == 300 ? "300ms（推奨）" : "\(milliseconds)ms"
             let option = NSMenuItem(title: title,
                                     action: #selector(selectMissionControlWait(_:)),
                                     keyEquivalent: "")
             option.target = self
             option.representedObject = milliseconds
-            option.state = milliseconds == MissionControlDirectSettings.readinessWaitMilliseconds
-                ? .on : .off
             missionControlWaitItems[milliseconds] = option
             waitMenu.addItem(option)
         }
+        waitMenu.addItem(.separator())
+        let customWait = NSMenuItem(title: "任意の待機時間を設定…",
+                                    action: #selector(promptMissionControlCustomWait),
+                                    keyEquivalent: "")
+        customWait.target = self
+        missionControlCustomWaitItem = customWait
+        waitMenu.addItem(customWait)
+        let resetWait = NSMenuItem(title: "300ms（推奨）にリセット",
+                                   action: #selector(resetMissionControlWait),
+                                   keyEquivalent: "")
+        resetWait.target = self
+        missionControlResetWaitItem = resetWait
+        waitMenu.addItem(resetWait)
         waitRoot.submenu = waitMenu
         menu.addItem(waitRoot)
+        updateMissionControlWaitMenuState()
         let diagnosis = NSMenuItem(title: "ショートカット診断…",
                                    action: #selector(showShortcutDiagnosis),
                                    keyEquivalent: "")
@@ -887,9 +901,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         MissionControlDirectSettings.readinessWaitMilliseconds = milliseconds
-        for (value, item) in missionControlWaitItems {
-            item.state = value == milliseconds ? .on : .off
+        updateMissionControlWaitMenuState()
+    }
+
+    @objc private func promptMissionControlCustomWait() {
+        let alert = NSAlert()
+        alert.messageText = "Mission Controlの待機時間"
+        alert.informativeText = "100〜1000msの整数で入力してください。"
+            + "300msが推奨値です。300ms未満では切り替えに失敗する可能性があります。"
+        alert.addButton(withTitle: "設定")
+        alert.addButton(withTitle: "キャンセル")
+
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = String(MissionControlDirectSettings.readinessWaitMilliseconds)
+        field.placeholderString = "例：275"
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        NSApp.activate(ignoringOtherApps: true)
+
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let input = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let milliseconds = Int(input),
+              MissionControlDirectSettings.isValidReadinessWait(milliseconds) else {
+            let warning = NSAlert()
+            warning.alertStyle = .warning
+            warning.messageText = "待機時間を変更できませんでした"
+            warning.informativeText = "100〜1000の整数を入力してください。設定は変更されていません。"
+            warning.runModal()
+            return
         }
+
+        MissionControlDirectSettings.readinessWaitMilliseconds = milliseconds
+        updateMissionControlWaitMenuState()
+    }
+
+    @objc private func resetMissionControlWait() {
+        MissionControlDirectSettings.readinessWaitMilliseconds =
+            MissionControlDirectSettings.defaultReadinessWaitMilliseconds
+        updateMissionControlWaitMenuState()
+    }
+
+    private func updateMissionControlWaitMenuState() {
+        let chosen = MissionControlDirectSettings.readinessWaitMilliseconds
+        for (value, item) in missionControlWaitItems {
+            item.state = value == chosen ? .on : .off
+        }
+        let custom = !MissionControlDirectSettings.readinessWaitOptions.contains(chosen)
+        missionControlCustomWaitItem?.state = custom ? .on : .off
+        missionControlCustomWaitItem?.title = custom
+            ? "任意の待機時間を設定…（現在：\(chosen)ms）"
+            : "任意の待機時間を設定…"
+        missionControlResetWaitItem?.isEnabled =
+            chosen != MissionControlDirectSettings.defaultReadinessWaitMilliseconds
     }
 
     @objc private func changeShortcut(_ sender: NSMenuItem) {
