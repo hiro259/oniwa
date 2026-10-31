@@ -6,9 +6,29 @@ import Foundation
 /// Separate opt-in mode. It does not change the existing instant/keyboard path.
 enum MissionControlDirectSettings {
     static let key = "oniwa.missionControlDirectEnabled"
+    static let readinessWaitKey = "oniwa.missionControlReadinessWaitMilliseconds"
+    static let readinessWaitOptions = [300, 250, 200, 150, 100]
+    static let defaultReadinessWaitMilliseconds = 300
+
     static var enabled: Bool {
         get { UserDefaults.standard.bool(forKey: key) }
         set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+
+    /// The delay after the complete AX thumbnail list is first observed.
+    /// This is NOT the entire duration Mission Control remains visible.
+    static var readinessWaitMilliseconds: Int {
+        get {
+            guard let value = UserDefaults.standard.object(forKey: readinessWaitKey) as? Int,
+                  readinessWaitOptions.contains(value) else {
+                return defaultReadinessWaitMilliseconds
+            }
+            return value
+        }
+        set {
+            guard readinessWaitOptions.contains(newValue) else { return }
+            UserDefaults.standard.set(newValue, forKey: readinessWaitKey)
+        }
     }
 }
 
@@ -72,9 +92,12 @@ enum MissionControlDirectSwitch {
         // Poll for readiness; do not assume a fixed animation duration.
         let deadline = ProcessInfo.processInfo.systemUptime + 2.5
         var lastReason = "AXツリーがまだ表示されていません"
-        // A matching AX subtree can appear before the Mission Control
-        // thumbnails accept AXPress. Hammerspoon waits ~300ms for UI readiness.
-        // Require the SAME verified list to remain ready before pressing.
+        // The user-configurable wait begins when the complete thumbnail list
+        // first appears. Even 100ms is experimental; keep all identity checks.
+        let readinessWaitMilliseconds = MissionControlDirectSettings.readinessWaitMilliseconds
+        let readinessWaitSeconds = Double(readinessWaitMilliseconds) / 1_000
+        SpaceSwitchDiagnostics.record(
+            "mc-direct readiness-setting waitMs=\(readinessWaitMilliseconds)")
         var readySince: TimeInterval?
         while ProcessInfo.processInfo.systemUptime < deadline {
             let candidates = candidateDisplayLists()
@@ -115,12 +138,14 @@ enum MissionControlDirectSwitch {
                             "mc-direct list-ready count=\(buttons.count)"
                             + " index=\(targetIndex)")
                     }
-                    guard let firstReady = readySince, now - firstReady >= 0.30 else {
+                    guard let firstReady = readySince,
+                          now - firstReady >= readinessWaitSeconds else {
                         Thread.sleep(forTimeInterval: 0.06)
                         continue
                     }
                     SpaceSwitchDiagnostics.record(
-                        "mc-direct ax-stable t=\(Int((now - firstReady) * 1000))ms")
+                        "mc-direct ax-stable t=\(Int((now - firstReady) * 1000))ms"
+                        + " configuredMs=\(readinessWaitMilliseconds)")
                     // Only press after the target index is proved by the live
                     // SkyLight roster and the exact thumbnail count.
                     let action = AXUIElementPerformAction(
