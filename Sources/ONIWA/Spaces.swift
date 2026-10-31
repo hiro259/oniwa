@@ -173,6 +173,13 @@ final class SpaceSwitcher {
                 "セット内のSpaceが見つかりません。別のSpaceに置き換えず、セットを編集してください。"))
         }
 
+        // Opt-in experiment only. The established two-session path below
+        // stays intact for ordinary users and as a manual fallback.
+        if MissionControlDirectSettings.enabled
+            && MissionControlPairSingleSessionSettings.enabled {
+            return performPairSingleSession(pair, before: before)
+        }
+
         // Snapshot unrelated displays so we can detect an unintended change.
         var untouched: [String: UInt64] = [:]
         for display in before
@@ -265,6 +272,115 @@ final class SpaceSwitcher {
                 + "別のSpaceへ変わりました。診断ログを確認してください。"))
         }
         SpaceSwitchDiagnostics.record("pair complete confirmed")
+        return .success(())
+    }
+
+    /// In the experimental mode both AX targets are prepared from one
+    /// Mission Control session. There is deliberately no retry or fallback:
+    /// once an AXPress is sent, a second session could produce a wrong move.
+    private func performPairSingleSession(
+        _ pair: SpacePair, before: [DisplayGroup]
+    ) -> Result<Void, Error> {
+        let reader = SpaceReader.shared
+        guard let resolved = SpacePairResolver.resolve(
+            pair, in: before.flatMap(\.spaces).map(\.identity)),
+              let firstDisplay = before.first(where: { $0.id == pair.first.displayID }),
+              let secondDisplay = before.first(where: { $0.id == pair.second.displayID }),
+              let first = firstDisplay.spaces.first(where: { $0.identity == resolved.0 }),
+              let second = secondDisplay.spaces.first(where: { $0.identity == resolved.1 }),
+              before.allSatisfy({ $0.currentID != nil }) else {
+            return .failure(SwitchFailure(
+                "試験モードで両画面のSpaceを一意に識別できません。"))
+        }
+
+        // Unrelated monitors must stay on their original Space.
+        let untouched = currentSpaceIDs(before.filter {
+            $0.id != first.displayID && $0.id != second.displayID
+        })
+        SpaceSwitchDiagnostics.record(
+            "mc-pair-once initial \(traceLayout(before))")
+        let bothAlreadyCurrent = firstDisplay.currentID == first.systemID
+            && secondDisplay.currentID == second.systemID
+        if !bothAlreadyCurrent {
+            switch MissionControlDirectSwitch.pressPairInOneSession(
+                first: first, second: second, reader: reader, original: before) {
+            case .failure(let error):
+                SpaceSwitchDiagnostics.record(
+                    "mc-pair-once press-failed: \(error.localizedDescription)")
+                return .failure(SwitchFailure(
+                    "Mission Control一回方式が失敗しました。"
+                    + "一方の画面だけ動いた可能性があります。"
+                    + "自動再試行は行いません。\(error.localizedDescription)"))
+            case .success:
+                break
+            }
+        }
+        // A successful AXPress only means that macOS accepted an action.
+        // Each target must be reached and remain stable, even if the other
+        // monitor temporarily shows a Mission Control overlay Space.
+        if !bothAlreadyCurrent {
+            let deadline = ProcessInfo.processInfo.systemUptime + 3.0
+            var arrived = false
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                Thread.sleep(forTimeInterval: pollInterval)
+                let current = reader.displays(includeAppNames: false)
+                guard SpacePairResolver.resolve(
+                    pair, in: current.flatMap(\.spaces).map(\.identity)) != nil else {
+                    SpaceSwitchDiagnostics.record(
+                        "mc-pair-once abort: target identity disappeared")
+                    return .failure(SwitchFailure(
+                        "切り替え中にセットのSpace構成が変わりました。"))
+                }
+                let ids = currentSpaceIDs(current)
+                let phase = MissionControlPairObservation.arrival(
+                    firstDisplay: first.displayID, firstTarget: first.systemID,
+                    secondDisplay: second.displayID, secondTarget: second.systemID,
+                    current: ids)
+                if phase == .arrived {
+                    SpaceSwitchDiagnostics.record(
+                        "mc-pair-once arrived \(traceLayout(current))")
+                    arrived = true
+                    break
+                }
+            }
+            guard arrived else {
+                SpaceSwitchDiagnostics.record(
+                    "mc-pair-once arrival-timeout \(traceLayout(reader.displays(includeAppNames: false)))")
+                return .failure(SwitchFailure(
+                    "Mission Control一回方式で両画面の到達を3秒以内に確認できませんでした。"
+                    + "自動で切り替え直しません。"))
+            }
+        }
+
+        // Check at multiple points to capture delayed snaps that occur
+        // hundreds of milliseconds after an apparently correct transition.
+        let startedAt = ProcessInfo.processInfo.systemUptime
+        var settled: [DisplayGroup] = []
+        for sample in [0.15, 0.35, 0.60, 0.85] {
+            Thread.sleep(forTimeInterval: max(
+                0, sample - (ProcessInfo.processInfo.systemUptime - startedAt)))
+            settled = reader.displays(includeAppNames: false)
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-once settle-sample t=\(Int(sample * 1000))ms"
+                + " \(traceLayout(settled))")
+        }
+        guard SpacePairResolver.resolve(
+            pair, in: settled.flatMap(\.spaces).map(\.identity)) != nil else {
+            return .failure(SwitchFailure(
+                "切り替え後にSpaceの識別子が変化しました。"))
+        }
+        let outcome = MissionControlPairObservation.settled(
+            firstDisplay: first.displayID, firstTarget: first.systemID,
+            secondDisplay: second.displayID, secondTarget: second.systemID,
+            untouched: untouched, current: currentSpaceIDs(settled))
+        guard outcome == .confirmed else {
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-once FAILED outcome=\(outcome)")
+            return .failure(SwitchFailure(
+                "Mission Control一回方式の完了後も両画面が正しいSpaceにありません"
+                + "（\(outcome)）。追加操作は行いません。"))
+        }
+        SpaceSwitchDiagnostics.record("mc-pair-once complete confirmed")
         return .success(())
     }
 
