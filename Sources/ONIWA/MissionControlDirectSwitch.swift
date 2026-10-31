@@ -7,7 +7,6 @@ import Foundation
 enum MissionControlDirectSettings {
     static let key = "oniwa.missionControlDirectEnabled"
     static let readinessWaitKey = "oniwa.missionControlReadinessWaitMilliseconds"
-    static let readinessWaitOptions = [300, 250, 200, 150, 100]
     static let defaultReadinessWaitMilliseconds = 300
     // 100ms is experimental; cap custom values so the AX readiness timeout
     // is not accidentally exceeded by a very large saved value.
