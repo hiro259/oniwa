@@ -321,6 +321,15 @@ final class SpaceSwitcher {
         }
 
         if MissionControlDirectSettings.enabled {
+            // To detect a real unintended switch, every other monitor needs a
+            // known baseline before Mission Control is opened. The overlay may
+            // temporarily report other IDs, but only the settled IDs are final.
+            let previousOthers = initialDisplays.filter { $0.id != target.displayID }
+            guard previousOthers.allSatisfy({ $0.currentID != nil }) else {
+                return .failure(SwitchFailure(
+                    "別モニターの現在のSpaceを確認できないため、切り替えを中断しました。"))
+            }
+            let expectedOtherIDs = currentSpaceIDs(previousOthers)
             SpaceSwitchDiagnostics.record(
                 "mc-direct selected target=\(target.systemID)"
                 + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))")
@@ -344,20 +353,32 @@ final class SpaceSwitcher {
                     return .failure(error)
                 case .success:
                     let after = reader.displays(includeAppNames: false)
-                    let previousOthers = initialDisplays.filter { $0.id != target.displayID }
-                    guard previousOthers.allSatisfy({ previous in
-                        guard let current = after.first(where: { $0.id == previous.id })
-                        else { return false }
-                        return current.currentID == previous.currentID
-                    }) else {
+                    // Mission Control temporarily exposes its overlay Space IDs
+                    // on other displays. Never fail just for an *intermediate*
+                    // change; after the target's 850ms settle, however, every
+                    // display must match its original Space exactly.
+                    let afterIDs = currentSpaceIDs(after)
+                    let outcome = MissionControlDirectObservation.settled(
+                        targetDisplay: target.displayID,
+                        expectedTarget: target.systemID,
+                        beforeOthers: expectedOtherIDs,
+                        after: afterIDs)
+                    switch outcome {
+                    case .confirmed:
                         SpaceSwitchDiagnostics.record(
-                            "mc-direct FAILED: another display changed")
+                            "mc-direct confirmed target=\(target.systemID)"
+                            + " all-displays-settled")
+                        return .success(())
+                    case .otherDisplayChanged, .displayUnavailable, .wrongTarget:
+                        SpaceSwitchDiagnostics.record(
+                            "mc-direct FAILED: post-settle outcome=\(outcome)"
+                            + " initial=\(traceLayout(initialDisplays))"
+                            + " actual=\(traceLayout(after))")
                         return .failure(SwitchFailure(
-                            "Mission Control直接移動中に別モニターのSpaceも変わりました。"
-                            + "追加操作は行いません。"))
+                            "Mission Control直接移動の完了後も別モニターまたは"
+                            + "対象Spaceの状態が一致しません。"
+                            + "安全のため追加操作は行いません。"))
                     }
-                    SpaceSwitchDiagnostics.record("mc-direct confirmed target=\(target.systemID)")
-                    return .success(())
                 }
             }
         }
@@ -631,10 +652,12 @@ final class SpaceSwitcher {
     }
 
 
-    /// The Accessibility API reports that the button was pressed, but does not
-    /// acknowledge a completed Space transition. Wait for the *first* correct
-    /// current ID before starting the independent post-arrival settling check.
-    /// An unexpected target or change on a different display is a hard stop.
+    /// AXPress acknowledges a click, not Space arrival. During the
+    /// Mission Control overlay SkyLight can temporarily report overlay Space
+    /// IDs on both monitors (observed on macOS 26.6, 2026-10-31). Those IDs
+    /// are provisional, including unexpected *target* IDs. Wait for the
+    /// requested target, then perform the full settled-display comparison
+    /// before allowing another Space switch. Never issue a fallback gesture.
     private func waitForDirectArrival(_ target: SpaceEntry, reader: SpaceReader,
                                       initial: [DisplayGroup]) -> Result<Void, Error> {
         let baseline = initial.first(where: { $0.id == target.displayID })?.currentID
@@ -642,6 +665,7 @@ final class SpaceSwitcher {
         let startedAt = ProcessInfo.processInfo.systemUptime
         let deadline = startedAt + 3.0
         var lastCurrent: UInt64? = baseline
+        var previousProvisionalOtherChanges: [String] = []
         while ProcessInfo.processInfo.systemUptime < deadline {
             Thread.sleep(forTimeInterval: pollInterval)
             let displays = reader.displays(includeAppNames: false)
@@ -651,12 +675,26 @@ final class SpaceSwitcher {
                 return .failure(SwitchFailure(
                     "Mission Control移動中に対象Spaceの識別情報が変化しました。"))
             }
-            guard otherDisplays.allSatisfy({ other in
-                displays.first(where: { $0.id == other.id })?.currentID == other.currentID
-            }) else {
-                SpaceSwitchDiagnostics.record("mc-direct arrival: other display changed")
-                return .failure(SwitchFailure(
-                    "Mission Control移動中に別モニターのSpaceが変わりました。"))
+
+            // Do not reject an in-progress AXPress because Mission Control
+            // momentarily changes a different monitor's Current Space ID.
+            // Record these samples for diagnosis; verify *all* displays after
+            // the 850ms settle interval before starting a second pair move.
+            let othersChanged: [String] = otherDisplays.compactMap { original in
+                let actual = displays.first(where: { $0.id == original.id })?.currentID
+                guard actual != original.currentID else { return nil }
+                return "\(SpaceSwitchDiagnostics.shortDisplay(original.id)):"
+                    + "\(original.currentID.map(String.init) ?? "missing")->"
+                    + "\(actual.map(String.init) ?? "missing")"
+            }.sorted()
+            if othersChanged != previousProvisionalOtherChanges {
+                if othersChanged.isEmpty {
+                    SpaceSwitchDiagnostics.record("mc-direct provisional-other restored")
+                } else {
+                    SpaceSwitchDiagnostics.record(
+                        "mc-direct provisional-other changes=\(othersChanged)")
+                }
+                previousProvisionalOtherChanges = othersChanged
             }
             let current = live.currentID
             if current != lastCurrent {
@@ -667,26 +705,29 @@ final class SpaceSwitcher {
                     + " current=\(current.map(String.init) ?? "unknown")")
                 lastCurrent = current
             }
-            if current == target.systemID {
+            switch MissionControlDirectObservation.arrival(
+                targetDisplay: target.displayID, expectedTarget: target.systemID,
+                after: currentSpaceIDs(displays)) {
+            case .arrived:
                 SpaceSwitchDiagnostics.record(
                     "mc-direct arrived target=\(target.systemID) latency="
-                    + "\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))ms")
+                    + "\(Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000))ms"
+                    + " provisionalOthers=\(othersChanged)")
                 return .success(())
-            }
-            if let current, current != baseline {
-                SpaceSwitchDiagnostics.record(
-                    "mc-direct wrong-arrival target=\(target.systemID) actual=\(current)")
-                return .failure(SwitchFailure(
-                    "Mission Controlが別のSpaceへ移動しました。"
-                    + "安全のため追加操作を行いません。"))
+            case .waiting, .displayUnavailable:
+                // The overlay may temporarily present Desktop 1 or an
+                // unavailable current ID. If it does not reach the target
+                // within three seconds, time out without further actions.
+                break
             }
         }
         SpaceSwitchDiagnostics.record(
             "mc-direct arrival-timeout target=\(target.systemID)"
-            + " actual=\(lastCurrent.map(String.init) ?? "unknown")")
+            + " actual=\(lastCurrent.map(String.init) ?? "unknown")"
+            + " provisionalOthers=\(previousProvisionalOtherChanges)")
         return .failure(SwitchFailure(
             "Mission Controlの操作後3秒以内に目的のSpaceへの移動を確認できませんでした。"
-            + "診断ログを確認してください。"))
+            + "誤移動の可能性があるため追加操作は行いません。診断ログを確認してください。"))
     }
 
     /// The read-only Current Space ID may update ahead of the visible desktop.
