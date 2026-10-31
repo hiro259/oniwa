@@ -51,6 +51,59 @@ final class SpaceNavigationTests: XCTestCase {
             }
     }
 
+    func testTrelloCaseReplansAfterMacOSReordersSpaces() throws {
+        // Captured from the user's Mac: the original route to Trello crossed
+        // ONIWA, main and Desktop 1, then macOS swapped ONIWA and main.
+        let before: [UInt64] = [3085, 3082, 3079, 1, 3076, 3121, 2986, 3128]
+        let after: [UInt64] = [3085, 3082, 3079, 1, 3121, 3076, 2986, 3128]
+        XCTAssertEqual(SpaceNavigation.layoutChange(from: before, to: after),
+                       .reordered)
+        XCTAssertEqual(
+            try SpaceNavigation.nextStep(
+                orderedSpaceIDs: before, current: 2986, target: 3085),
+            .move(.left, nextSpaceID: 3121))
+        XCTAssertEqual(
+            try SpaceNavigation.nextStep(
+                orderedSpaceIDs: after, current: 1, target: 3085),
+            .move(.left, nextSpaceID: 3079))
+        XCTAssertEqual(
+            try SpaceNavigation.nextStep(
+                orderedSpaceIDs: after, current: 3079, target: 3085),
+            .move(.left, nextSpaceID: 3082))
+        XCTAssertEqual(
+            try SpaceNavigation.nextStep(
+                orderedSpaceIDs: after, current: 3082, target: 3085),
+            .move(.left, nextSpaceID: 3085))
+        XCTAssertEqual(
+            try SpaceNavigation.nextStep(
+                orderedSpaceIDs: after, current: 3085, target: 3085),
+            .arrived)
+    }
+
+    func testSafeReorderRequiresExactlySameUniqueSpaceIDs() {
+        XCTAssertEqual(
+            SpaceNavigation.layoutChange(from: [1, 2, 3], to: [1, 2, 3]),
+            .unchanged)
+        XCTAssertEqual(
+            SpaceNavigation.layoutChange(from: [1, 2, 3], to: [1, 3, 2]),
+            .reordered)
+        XCTAssertEqual(
+            SpaceNavigation.layoutChange(from: [1, 2, 3], to: [1, 2]),
+            .membershipChanged)
+        XCTAssertEqual(
+            SpaceNavigation.layoutChange(from: [1, 2, 3], to: [1, 2, 4]),
+            .membershipChanged)
+        XCTAssertEqual(
+            SpaceNavigation.layoutChange(from: [1, 2, 3], to: [1, 2, 2]),
+            .membershipChanged)
+        XCTAssertEqual(
+            SpaceNavigation.layoutChange(from: [1, 2, 2], to: [2, 1, 2]),
+            .membershipChanged)
+        XCTAssertEqual(
+            SpaceNavigation.layoutChange(from: [], to: []),
+            .membershipChanged)
+    }
+
     func testEmptyLayoutIsNotSuccess() {
         XCTAssertThrowsError(try SpaceNavigation.nextStep(
             orderedSpaceIDs: [], current: 1, target: 1)) {

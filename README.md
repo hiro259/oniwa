@@ -25,7 +25,7 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 - On an empty query results retain their existing order; a query containing only tag separators does not accidentally select an arbitrary Space.
 
 - Labels are local UserDefaults data. No analytics or network requests.
-- Space discovery uses private **read-only** SkyLight symbols. Switching posts the standard `Ctrl+← / →` shortcut through Core Graphics with a **HID-system-state event source**, explicit Control-key down/up, and the arrow-key Fn/NumericPad flags required on some macOS versions (not AppleScript/System Events). It now confirms **each neighboring Space** before continuing; it stops on unexpected movement, disappearing Spaces, or reordering.
+- Space discovery uses private **read-only** SkyLight symbols. Switching posts the standard `Ctrl+← / →` shortcut through Core Graphics with a **HID-system-state event source**, explicit Control-key down/up, and the arrow-key Fn/NumericPad flags required on some macOS versions (not AppleScript/System Events). It now confirms **each neighboring Space** before continuing; it stops on unexpected movement, missing/recreated Spaces, or changed monitor identity, but safely replans from a fresh layout when macOS merely permutes the same UUID-backed Spaces.
 
 ## Space naming and persistence (Issue #3)
 
@@ -49,6 +49,51 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 
 Unit tests in `SpaceLabelsTests.swift` cover persistence, safe deletion, multi-monitor isolation, legacy migration, ambiguous UUIDs, and the no-UUID session-only fallback. Real-Mac tests are still needed for actual SkyLight UUID behavior.
 
+## Two-monitor Space sets (experimental, Issue #11)
+
+- In the ONIWA search palette, choose **セットを追加** to create a named set such as **ONIWA開発**.
+- Select one Space on monitor 1 (e.g. `Chrome Dev ONIWA`) and one Space on a **different** monitor (e.g. `Term ONIWA`), then save. Create as many sets as needed.
+- Sets appear alongside individual Space results and can be found by name, their member Space names, or member app names. The **same ↑/↓ → Enter** keyboard flow activates a set. Single-Space switching remains unchanged.
+- To change or delete a set, click its pencil button. A pair whose target Space was removed or whose monitor was disconnected remains visible with a warning so you can reconfigure or delete it.
+- Set targets use **display ID + Space UUID**, never Space number or window title. A Space without a UUID cannot be saved in a set (it cannot be reliably identified after relaunch). Pair data persists locally in UserDefaults, separate from individual Space labels.
+- Switching is **sequential and verified**: first monitor, then second. If a target is already visible it is skipped. The first monitor's target is rechecked before the second transition; final IDs on both monitors and unrelated displays are checked after switching.
+- A partially failed set displays the error and which step reached its target. ONIWA does **not** automatically roll back a successful first transition because a rollback could itself select an unintended Space.
+- Both the instant Space-switch path and the existing verified normal Control+Arrow fallback are reused. The private macOS SkyLight API is still only read.
+
+### Switching target diagnostics (2026-10-30)
+
+**Observed user symptom:** Some pair switches reach the requested Spaces, others move an unexpected monitor or fail. The exact affected OS state has not yet been reproduced in a Mac debugger.
+
+**Likely bug in the previous implementation:** `CGWarpMouseCursorPosition` moves the cursor but does not generate a `mouseMoved` event (Apple-documented behavior). Dock and Mission Control can therefore still route a synthetic swipe/Control+Arrow to a previously active display. Previous verification polled only the requested display, missing a wrong-monitor transition until the end of the set.
+
+**Mitigations:** ONIWA now posts a genuine, button-free mouseMoved after repositioning, checks that the pointer is on the requested display, samples all displays **after each gesture/key step** and aborts on any unrelated display change. Never send a fallback key after an unexpected change. A user moving the pointer to another monitor also aborts the pending keyboard fallback.
+
+**Local diagnostic log:** `~/Library/Logs/ONIWA/switch.log` (rotated, capped at 256 KB). Use menu bar **庭 → 切り替え診断ログを開く…**, or in fish:
+
+```fish
+tail -n 80 ~/Library/Logs/ONIWA/switch.log
+```
+
+Trace lines include Space numeric IDs, shortened display IDs, intended step, actual confirmation, and `WRONG-DISPLAY` / timeout. For mismatch diagnosis they now also include the **selected visible Space name**, its abbreviated UUID and process-level app names; `space-map` lists the display's Space IDs with their saved labels and associated process names after a completed single switch. They do **not** include typed search terms or window/browser-tab titles. These are local files, never uploaded. **Review the log before sharing**, because saved Space names and process names may be personal. For a controlled comparison, repeat the same pair with **庭 → 瞬時切り替え（試験的）** ON and OFF, recording which mode fails. This is diagnostic evidence, not a guarantee that all OS-level routing bugs are fixed.
+**Investigating “Trello” (or any other name) opened a different Space:** after a failed single-Space selection, compare the `ui-activate single name=[...]`/space ID to the `single-settled` and `space-map` lines for that display. If the correct numeric Space was reached but Trello is associated with a different ID, the problem is labeling/app-to-Space association rather than a missed swipe. ONIWA stores saved names against Space UUIDs, **not** a dynamically moving app window or browser tab. Recent-use reordering changes display order but should not reassign a UUID-backed label. A stale selected search result now refuses activation rather than silently launching the first unrelated result. Single-Space success also requires a delayed readback of the current Space ID (850 ms).
+
+### macOS automatic Space reordering — Trello regression (2026-10-30)
+
+A real Mac trace from 09:35:31 UTC captured the reproducible cause of an incomplete Trello switch: while navigating to Space `3085`, ONIWA confirmed Space IDs `2986 → 3121 → 3076 → 1`, then macOS reordered `3121` and `3076` in the live Spaces list. The original implementation aborted on **any** reorder, leaving the requested Trello destination unreached.
+
+**Fix:** On each confirmed step, ONIWA now checks that the live layout is exactly a permutation of the original unique Space IDs, with the *same display+Space UUID identity for every member*. If so, it logs `order-replanned` and uses the **current** order to compute the next adjacent step. It aborts on added/removed/recreated Spaces, changed UUIDs, misrouted display events, an unconfirmed expected neighbor or repeated navigation states. A finite step budget also prevents switching loops. The keyboard fallback must still see the **same order as just before that event**; ONIWA never uses a stale direction after a gesture's timeout.
+
+There is a regression test using the user's exact original and reordered ID arrays. The macOS feature **Automatically rearrange Spaces based on most recent use** can stay enabled; ONIWA does not modify it. This change is unverified on the user's screen until a new real-Mac test.
+
+### Pair validation checklist (real Mac)
+
+1. Create **ONIWA開発** pairing `Chrome Dev ONIWA` on the first display and `Term ONIWA` on the second. Search its name and press Enter; confirm both displays arrive at their assigned Spaces.
+2. Keep one display on its target and switch again; only the other display should move.
+3. Edit a saved pair, change either destination, and verify persistence after quitting/relaunching ONIWA. Delete a pair and confirm normal Space labels are unaffected.
+4. Confirm the Space on any *unrelated* display remains unchanged.
+5. Rearrange Spaces, then rename individual Space labels; the set should still select the original UUID identities.
+6. Remove a target Space or disconnect its monitor; verify the pair reports unavailable and does not choose an arbitrary replacement. Recreate/reconnect and edit it explicitly.
+7. Test fullscreen Spaces and the instant-switch ON/OFF setting. Check that failure messages do not claim success after only one display moved.
 ## Build (macOS)
 
 Requires macOS 13+, Apple developer command line tools or Xcode.

@@ -52,6 +52,9 @@ enum InstantSpaceGesture {
         guard isSupported, CGPreflightPostEventAccess() else { return false }
 
         let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        // Record phase post times only after all events have been sent.
+        // Logging between phases would change the experimental gesture timing.
+        var phasePostUptimeMS: [Int64] = []
         if major >= 27 {
             let naturalScroll = CFPreferencesCopyAppValue(
                 "com.apple.swipescrolldirection" as CFString,
@@ -70,6 +73,7 @@ enum InstantSpaceGesture {
                 pairs.append((augmented, companion))
             }
             for (event, companion) in pairs {
+                phasePostUptimeMS.append(Int64(ProcessInfo.processInfo.systemUptime * 1000))
                 event.post(tap: .cgSessionEventTap)
                 companion.post(tap: .cgSessionEventTap)
             }
@@ -81,8 +85,16 @@ enum InstantSpaceGesture {
                 else { return false }
                 events.append(event)
             }
-            events.forEach { $0.post(tap: .cgSessionEventTap) }
+            for event in events {
+                phasePostUptimeMS.append(Int64(ProcessInfo.processInfo.systemUptime * 1000))
+                event.post(tap: .cgSessionEventTap)
+            }
         }
+        let finishedMS = Int64(ProcessInfo.processInfo.systemUptime * 1000)
+        SpaceSwitchDiagnostics.record(
+            "gesture-post direction=\(right ? "right" : "left") osMajor=\(major) "
+            + "phaseUptimeMs=\(phasePostUptimeMS) postCompleteUptimeMs=\(finishedMS)"
+        )
         return true
     }
 
@@ -205,5 +217,13 @@ enum InstantSwitchSettings {
     static var enabled: Bool {
         get { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: key) }
+    }
+
+    // Diagnostic A/B control. Default OFF: no effect on normal instant switching.
+    // When ON, each confirmed fast step is held for 450ms and rechecked.
+    static let pacingProbeKey = "oniwa.instantPacingProbeEnabled"
+    static var pacingProbeEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: pacingProbeKey) }
+        set { UserDefaults.standard.set(newValue, forKey: pacingProbeKey) }
     }
 }
