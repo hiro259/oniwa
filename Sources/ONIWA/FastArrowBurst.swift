@@ -3,9 +3,11 @@ import CoreGraphics
 import Foundation
 import ONIWACore
 
-/// Separate experiment path: mimics repeatedly pressing physical Control+Arrow
-/// without waiting for intermediate Space ID transitions. Does NOT call SkyLight
-/// setters. Returning a post count is not proof of a completed Space switch.
+/// ONIWA's standard 50ms Control+Arrow posting primitive (also supports the
+/// archived 100ms comparison). No per-neighbor wait and no private SkyLight
+/// writes. A posted event count is NOT proof of completed Space switching;
+/// the caller must verify the settled monitor/Space IDs.
+/// Research and adoption rationale: https://github.com/hiro259/oniwa/issues/15
 enum FastArrowBurst {
     struct Posting {
         let posted: Int
