@@ -17,6 +17,24 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 - **Real-Mac evidence (2026-11-01):** all 13 sampled 50ms burst switches and all five sampled paired switches completed and passed the delayed ID checks; jumps up to seven neighboring Spaces were observed. This is promising, **not** a claim of universal reliability.
 - Research log: [Issue #15](https://github.com/hiro259/oniwa/issues/15); ongoing pair feature: [Issue #11](https://github.com/hiro259/oniwa/issues/11); code under [Draft PR #14](https://github.com/hiro259/oniwa/pull/14).
 
+## Search palette design presets (Issue #12 — preview)
+
+ONIWA's `庭 → 検索パレットのデザイン` menu offers five visual presets. The change is **presentation-only**; changing styles does not alter search results, Space targets, pinned order, saved labels or the standard 50ms Space-switching route.
+
+| Preset | Focus |
+|---|---|
+| **Native Calm** (default) | Restrained macOS-native hierarchy and neutral current indicators |
+| **Frosted Focus** | Translucent material around search controls, larger rounding and light surfaces |
+| **Command Compact** | Small, dense keyboard-first command palette |
+| **Studio Cards** | Spacious, card-like rows and bigger project names |
+| **Monitor Focus** | Clearer per-monitor labels and two-display set cues |
+
+Each option adjusts typography, panel size, density, insets, corners, and row/monitor accents as applicable. The choice persists locally using `oniwa.paletteDesign` (UserDefaults); unknown values revert to Native Calm. Existing editing sheets, Japanese IME, `↑ ↓ Enter Esc` shortcuts and real Space switching keep the same behavior.
+
+This branch is a **visual comparison prototype**. Try the designs on an actual Mac in both light and dark appearance before choosing a final default and merging. No macOS 26+ exclusive Liquid Glass APIs are required, keeping the project's macOS 13 deployment target.
+
+Research and choices: [Issue #12](https://github.com/hiro259/oniwa/issues/12).
+
 ## First prototype
 
 - **New installations:** `⌥ Option + Space` opens the search palette by default. Existing installations retain their previously selected shortcut until changed. The menu-bar **庭** remains the fallback if a combination is intercepted by macOS.
