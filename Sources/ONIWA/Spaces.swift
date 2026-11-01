@@ -173,6 +173,10 @@ final class SpaceSwitcher {
                 "セット内のSpaceが見つかりません。別のSpaceに置き換えず、セットを編集してください。"))
         }
 
+        let numberedMode = SwitchModeSettings.desktopNumberExperimentMode
+        if numberedMode != .off {
+            return performNumberedPair(pair, before: before, mode: numberedMode)
+        }
         let pairMode = SwitchModeSettings.pair
         let mcOneSessionExperiment =
             SwitchModeSettings.globalMCOneSessionExperimentEnabled
@@ -464,6 +468,378 @@ final class SpaceSwitcher {
         }
         SpaceSwitchDiagnostics.record("pair-hybrid complete confirmed")
         return .success(())
+    }
+
+    /// The numeric shortcut is experimental and NOT a direct Space ID setter.
+    /// It addresses only user Desktops 1...9 and requires the user's standard
+    /// Control+digit Mission Control shortcut to already be enabled.
+    private enum NumberedOutcome {
+        case complete
+        case missing([String])
+        case unsafe(String)
+    }
+
+    /// Samples all monitors, including the post-switch 350-400ms snap-back
+    /// window. Unrelated monitors and any intermediate *wrong* ID are unsafe.
+    /// Only stable, unchanged IDs may receive a keyboard fallback.
+    private func inspectNumberedTransition(
+        baseline: [DisplayGroup],
+        impacted: [String: UInt64],
+        trial: Int64,
+        label: String
+    ) -> NumberedOutcome {
+        let baselineIDs = currentSpaceIDs(baseline)
+        let start = ProcessInfo.processInfo.systemUptime
+        var samples: [[String: UInt64]] = []
+        for delay in [0.15, 0.35, 0.60, 0.85, 1.20] {
+            Thread.sleep(forTimeInterval: max(
+                0, delay - (ProcessInfo.processInfo.systemUptime - start)))
+            let current = SpaceReader.shared.displays(includeAppNames: false)
+            let ids = currentSpaceIDs(current)
+            let rosterStable = current.count == baseline.count
+                && baseline.allSatisfy { prior in
+                    current.first(where: { $0.id == prior.id })?
+                        .spaces.map(\.identity) == prior.spaces.map(\.identity)
+                }
+            let validIDs = ids.count == baselineIDs.count
+                && baselineIDs.allSatisfy { id, old in
+                    guard let now = ids[id] else { return false }
+                    if let target = impacted[id] {
+                        return now == old || now == target
+                    }
+                    return now == old
+                }
+            SpaceSwitchDiagnostics.record(
+                "desktop-number trial=\(trial) sample=\(label)"
+                + " delayMs=\(Int(delay * 1000)) rosterStable=\(rosterStable)"
+                + " validIDs=\(validIDs) \(traceLayout(current))")
+            guard rosterStable && validIDs else {
+                return .unsafe("unrelated-space-or-roster-changed")
+            }
+            samples.append(ids)
+        }
+
+        guard samples.count >= 2,
+              let final = samples.last,
+              samples[samples.count - 2] == final else {
+            return .unsafe("not-stable-at-end")
+        }
+
+        // Never repair an apparent failure if it was first observed at its
+        // destination and then reverted: macOS may still own the transition.
+        for (id, target) in impacted {
+            guard let old = baselineIDs[id],
+                  let now = final[id] else { return .unsafe("missing-display") }
+            if now == old && old != target
+                && samples.dropLast().contains(where: { $0[id] == target }) {
+                return .unsafe("snap-back-after-arrival")
+            }
+        }
+        let missing = impacted.keys.filter { final[$0] != impacted[$0] }.sorted()
+        SpaceSwitchDiagnostics.record(
+            "desktop-number trial=\(trial) inspected=\(label)"
+            + " missing=\(missing.map(SpaceSwitchDiagnostics.shortDisplay))")
+        return missing.isEmpty ? .complete : .missing(missing)
+    }
+
+    /// No double posting: an incomplete numeric shortcut is repaired only
+    /// after repeated, unchanged snapshots, and the keyboard route starts
+    /// only from the exact old Space.
+    private func repairNumberedTargets(
+        _ missing: [String],
+        baseline: [DisplayGroup],
+        targets: [String: SpaceEntry],
+        trial: Int64
+    ) -> Result<Void, Error> {
+        var expectedIDs = currentSpaceIDs(SpaceReader.shared.displays(includeAppNames: false))
+        let originalIDs = currentSpaceIDs(baseline)
+        for displayID in missing {
+            let before = SpaceReader.shared.displays(includeAppNames: false)
+            guard currentSpaceIDs(before) == expectedIDs,
+                  before.count == baseline.count,
+                  baseline.allSatisfy({ old in
+                      before.first(where: { $0.id == old.id })?
+                          .spaces.map(\.identity) == old.spaces.map(\.identity)
+                  }),
+                  expectedIDs[displayID] == originalIDs[displayID],
+                  let target = targets[displayID] else {
+                return .failure(SwitchFailure(
+                    "番号指定後にSpaceが変化しました。追加のキーは送信しません。"))
+            }
+            SpaceSwitchDiagnostics.record(
+                "desktop-number trial=\(trial) keyboard-fallback"
+                + " display=\(SpaceSwitchDiagnostics.shortDisplay(displayID))"
+                + " target=\(target.systemID)")
+            switch performSwitch(target, preferredMode: .keyboard,
+                                globalExperiment: false) {
+            case .failure(let error):
+                return .failure(SwitchFailure(
+                    "番号指定後のキーボード補完に失敗しました。"
+                    + error.localizedDescription))
+            case .success:
+                expectedIDs[displayID] = target.systemID
+                SpaceSwitchDiagnostics.record(
+                    "desktop-number trial=\(trial) keyboard-repaired"
+                    + " display=\(SpaceSwitchDiagnostics.shortDisplay(displayID))")
+            }
+        }
+        return .success(())
+    }
+
+    private func verifyNumberedFinal(
+        baseline: [DisplayGroup],
+        targets: [String: SpaceEntry],
+        trial: Int64
+    ) -> Result<Void, Error> {
+        let first = SpaceReader.shared.displays(includeAppNames: false)
+        Thread.sleep(forTimeInterval: 0.85)
+        let last = SpaceReader.shared.displays(includeAppNames: false)
+        let original = currentSpaceIDs(baseline)
+        let firstIDs = currentSpaceIDs(first)
+        let lastIDs = currentSpaceIDs(last)
+        let valid = firstIDs == lastIDs
+            && last.count == baseline.count
+            && baseline.allSatisfy { old in
+                last.first(where: { $0.id == old.id })?
+                    .spaces.map(\.identity) == old.spaces.map(\.identity)
+            }
+            && original.allSatisfy { id, old in
+                if let target = targets[id] {
+                    return lastIDs[id] == target.systemID
+                }
+                return lastIDs[id] == old
+            }
+        SpaceSwitchDiagnostics.record(
+            "desktop-number trial=\(trial) finalVerified=\(valid)"
+            + " \(traceLayout(last))")
+        guard valid else {
+            return .failure(SwitchFailure(
+                "番号指定後のSpace状態が一致しません。安全のため追加操作せず停止しました。"))
+        }
+        return .success(())
+    }
+
+    private func performNumberedPair(
+        _ pair: SpacePair, before: [DisplayGroup],
+        mode: DesktopNumberExperimentMode
+    ) -> Result<Void, Error> {
+        let reader = SpaceReader.shared
+        guard let identities = SpacePairResolver.resolve(
+            pair, in: before.flatMap(\.spaces).map(\.identity)),
+              let firstGroup = before.first(where: { $0.id == pair.first.displayID }),
+              let secondGroup = before.first(where: { $0.id == pair.second.displayID }),
+              let first = firstGroup.spaces.first(where: { $0.identity == identities.0 }),
+              let second = secondGroup.spaces.first(where: { $0.identity == identities.1 }),
+              first.displayID != second.displayID,
+              before.allSatisfy({ $0.currentID != nil }) else {
+            return .failure(SwitchFailure(
+                "番号指定実験：セットの2画面を一意に特定できません。"))
+        }
+        SpaceSwitchDiagnostics.beginWorkspaceTrace()
+        defer { SpaceSwitchDiagnostics.endWorkspaceTrace() }
+        let trial = Int64(ProcessInfo.processInfo.systemUptime * 1000)
+        let targets: [String: SpaceEntry] = [
+            first.displayID: first, second.displayID: second
+        ]
+        let baselineIDs = currentSpaceIDs(before)
+        let pending = [first, second].filter {
+            baselineIDs[$0.displayID] != $0.systemID
+        }
+        let preparations = pending.map { target -> (SpaceEntry, DesktopNumberShortcut.Preparation) in
+            let group = target.displayID == first.displayID ? firstGroup : secondGroup
+            return (target, DesktopNumberShortcut.prepare(target, in: group))
+        }
+        let isAllDirect = preparations.allSatisfy {
+            if case .ready = $0.1 { return true }
+            return false
+        }
+        // Rapid mode is meaningful only when both shortcuts are available.
+        // An ineligible Space safely degrades to verified per-monitor mode.
+        let rapid = mode == .rapid && isAllDirect && pending.count == 2
+        SpaceSwitchDiagnostics.record(
+            "desktop-number trial=\(trial) begin mode=\(mode.rawValue)"
+            + " actual=\(rapid ? "rapid" : "sequential")"
+            + " pending=\(pending.map { SpaceSwitchDiagnostics.shortDisplay($0.displayID) })"
+            + " \(traceLayout(before))")
+
+        if rapid {
+            guard CGPreflightPostEventAccess() else {
+                _ = CGRequestPostEventAccess()
+                return .failure(SwitchFailure(
+                    "番号指定キー送信が許可されていません。アクセシビリティ権限を確認してください。"))
+            }
+            for (idx, entry) in preparations.enumerated() {
+                guard case .ready(let shortcut) = entry.1,
+                      let bounds = reader.displayBounds(for: entry.0.displayID),
+                      routePointer(to: bounds, displayID: entry.0.displayID) else {
+                    return .failure(SwitchFailure(
+                        "番号指定：画面を識別できず送信を停止しました。"))
+                }
+                // Before pressing the second shortcut, first may be old or
+                // target; other displays must remain at baseline.
+                let current = reader.displays(includeAppNames: false)
+                let ids = currentSpaceIDs(current)
+                let safe = current.count == before.count
+                    && before.allSatisfy { old in
+                        current.first(where: { $0.id == old.id })?
+                            .spaces.map(\.identity) == old.spaces.map(\.identity)
+                    }
+                    && baselineIDs.allSatisfy { id, initial in
+                        let permitted = idx > 0 && id == first.displayID
+                            ? [initial, first.systemID] : [initial]
+                        return ids[id].map { permitted.contains($0) } ?? false
+                    }
+                guard safe else {
+                    return .failure(SwitchFailure(
+                        "番号指定の高速連続送信中に想定外のSpace移動を検出しました。"))
+                }
+                let sentAt = Int64(ProcessInfo.processInfo.systemUptime * 1000)
+                guard DesktopNumberShortcut.post(shortcut) else {
+                    return .failure(SwitchFailure(
+                        "番号指定キー送信に失敗しました。追加操作を停止します。"))
+                }
+                SpaceSwitchDiagnostics.record(
+                    "desktop-number trial=\(trial) posted-rapid"
+                    + " order=\(idx + 1) display=\(SpaceSwitchDiagnostics.shortDisplay(entry.0.displayID))"
+                    + " desktop=\(shortcut.number) uptimeMs=\(sentAt)")
+            }
+            let impacted = Dictionary(uniqueKeysWithValues:
+                pending.map { ($0.displayID, $0.systemID) })
+            let observed = inspectNumberedTransition(
+                baseline: before, impacted: impacted, trial: trial,
+                label: "rapid")
+            switch observed {
+            case .complete:
+                SpaceSwitchDiagnostics.record(
+                    "desktop-number trial=\(trial) result=direct-both rapid=true")
+            case .missing(let ids):
+                SpaceSwitchDiagnostics.record(
+                    "desktop-number trial=\(trial) rapid-missed=\(ids)")
+                switch repairNumberedTargets(ids, baseline: before,
+                                             targets: targets, trial: trial) {
+                case .success: break
+                case .failure(let error): return .failure(error)
+                }
+            case .unsafe(let reason):
+                SpaceSwitchDiagnostics.record(
+                    "desktop-number trial=\(trial) result=unsafe-abort reason=\(reason)")
+                return .failure(SwitchFailure(
+                    "番号指定の高速連続送信後に状態が不安定です（\(reason)）。"
+                    + "追加のキー操作は行いません。"))
+            }
+        } else {
+            for (target, preparation) in preparations {
+                let groupBaseline = reader.displays(includeAppNames: false)
+                let startIDs = currentSpaceIDs(groupBaseline)
+                guard groupBaseline.count == before.count,
+                      before.allSatisfy({ old in
+                          groupBaseline.first(where: { $0.id == old.id })?
+                              .spaces.map(\.identity) == old.spaces.map(\.identity)
+                      }),
+                      targets.allSatisfy({ id, entry in
+                          let expected = id == target.displayID
+                              ? baselineIDs[id] : (startIDs[id] ?? 0)
+                          return startIDs[id] == expected
+                              || startIDs[id] == entry.systemID
+                      }) else {
+                    return .failure(SwitchFailure(
+                        "番号指定の逐次移動前にSpace構成が変化しました。"))
+                }
+                switch preparation {
+                case .fallback(let reason):
+                    SpaceSwitchDiagnostics.record(
+                        "desktop-number trial=\(trial) skipped-numeric"
+                        + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
+                        + " reason=\(reason) fallback=keyboard")
+                    switch performSwitch(target, preferredMode: .keyboard,
+                                        globalExperiment: false) {
+                    case .success: break
+                    case .failure(let error): return .failure(error)
+                    }
+                case .ready(let shortcut):
+                    guard let bounds = reader.displayBounds(for: target.displayID),
+                          routePointer(to: bounds, displayID: target.displayID),
+                          DesktopNumberShortcut.post(shortcut) else {
+                        return .failure(SwitchFailure(
+                            "番号指定キーを対象画面へ送信できませんでした。"))
+                    }
+                    SpaceSwitchDiagnostics.record(
+                        "desktop-number trial=\(trial) posted-sequential"
+                        + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
+                        + " desktop=\(shortcut.number)")
+                    let inspected = inspectNumberedTransition(
+                        baseline: groupBaseline,
+                        impacted: [target.displayID: target.systemID],
+                        trial: trial, label: "sequential")
+                    switch inspected {
+                    case .complete:
+                        SpaceSwitchDiagnostics.record(
+                            "desktop-number trial=\(trial) direct-confirmed"
+                            + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))")
+                    case .missing(let ids):
+                        switch repairNumberedTargets(ids, baseline: groupBaseline,
+                                                     targets: targets, trial: trial) {
+                        case .success: break
+                        case .failure(let error): return .failure(error)
+                        }
+                    case .unsafe(let reason):
+                        SpaceSwitchDiagnostics.record(
+                            "desktop-number trial=\(trial) result=unsafe-abort reason=\(reason)")
+                        return .failure(SwitchFailure(
+                            "番号指定の逐次移動後に状態が不安定です（\(reason)）。"
+                            + "追加操作は行いません。"))
+                    }
+                }
+            }
+        }
+        switch verifyNumberedFinal(baseline: before, targets: targets, trial: trial) {
+        case .success:
+            SpaceSwitchDiagnostics.record(
+                "desktop-number trial=\(trial) result=pair-complete"
+                + " mode=\(mode.rawValue) actual=\(rapid ? "rapid" : "sequential")")
+            return .success(())
+        case .failure(let error): return .failure(error)
+        }
+    }
+
+    private func performNumberedSingle(
+        _ target: SpaceEntry, before: [DisplayGroup],
+        shortcut: DesktopNumberShortcut.Ready
+    ) -> Result<Void, Error> {
+        let reader = SpaceReader.shared
+        let trial = Int64(ProcessInfo.processInfo.systemUptime * 1000)
+        SpaceSwitchDiagnostics.beginWorkspaceTrace()
+        defer { SpaceSwitchDiagnostics.endWorkspaceTrace() }
+        guard let bounds = reader.displayBounds(for: target.displayID),
+              routePointer(to: bounds, displayID: target.displayID),
+              DesktopNumberShortcut.post(shortcut) else {
+            return .failure(SwitchFailure(
+                "単独Spaceの番号指定キーを送信できませんでした。"))
+        }
+        SpaceSwitchDiagnostics.record(
+            "desktop-number trial=\(trial) single-posted"
+            + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
+            + " desktop=\(shortcut.number)")
+        switch inspectNumberedTransition(
+            baseline: before, impacted: [target.displayID: target.systemID],
+            trial: trial, label: "single"
+        ) {
+        case .complete:
+            return verifyNumberedFinal(
+                baseline: before, targets: [target.displayID: target], trial: trial)
+        case .missing(let ids):
+            switch repairNumberedTargets(ids, baseline: before,
+                                         targets: [target.displayID: target],
+                                         trial: trial) {
+            case .failure(let error): return .failure(error)
+            case .success:
+                return verifyNumberedFinal(
+                    baseline: before, targets: [target.displayID: target], trial: trial)
+            }
+        case .unsafe(let reason):
+            return .failure(SwitchFailure(
+                "単独Space番号指定の結果が不安定です（\(reason)）。追加操作しません。"))
+        }
     }
 
     /// Diagnostic experiment: select both MC thumbnails from ONE session.
