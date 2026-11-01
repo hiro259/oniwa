@@ -93,7 +93,7 @@ final class SearchState: ObservableObject {
 
     func monitorName(_ space: SpaceEntry) -> String {
         let number = (groups.firstIndex(where: { $0.id == space.displayID }) ?? 0) + 1
-        return "モニター\(number)（\(space.displayName)）"
+        return AppLanguage.ui("モニター\(number)（\(space.displayName)）", "Display \(number) (\(space.displayName))")
     }
 
     func resolvedSpaces(for pair: SpacePair) -> (SpaceEntry, SpaceEntry)? {
@@ -260,7 +260,7 @@ final class SearchState: ObservableObject {
         guard let first = choices.first,
               let second = choices.first(where: { $0.displayID != first.displayID })
         else {
-            errorMessage = "セットには別々の2つのモニターと、UUIDのあるSpaceが必要です。"
+            errorMessage = AppLanguage.ui("別々の2画面に、登録できるSpaceが必要です。", "Two displays with available Spaces are required.")
             return
         }
         pairNameDraft = ""
@@ -303,7 +303,7 @@ final class SearchState: ObservableObject {
                   in: SpaceReader.shared.displays(includeAppNames: false)
                       .flatMap(\.spaces).map(\.identity))
         else {
-            errorMessage = "セットを保存できません。対象のSpaceとモニターを確認してください。"
+            errorMessage = AppLanguage.ui("セットを保存できません。Spaceを選び直してください。", "Couldn't save the set. Choose the Spaces again.")
             pairEditing = false
             return
         }
@@ -339,7 +339,7 @@ final class SearchState: ObservableObject {
             + "\(String(pair.second.uuid.prefix(8)))"
         )
         guard resolvedSpaces(for: pair) != nil else {
-            errorMessage = "セットのSpaceが見つかりません。鉛筆ボタンから再設定してください。"
+            errorMessage = AppLanguage.ui("セットのSpaceが見つかりません。セットを編集してください。", "Set Spaces weren't found. Edit the set.")
             return
         }
         isSwitching = true
@@ -363,8 +363,8 @@ final class SearchState: ObservableObject {
         observeCurrentSpaces(groups)
         if !groups.isEmpty { labels.reconcile(groups.flatMap(\.spaces).map(\.identity)) }
         errorMessage = SpaceReader.shared.available
-            ? (groups.isEmpty ? "No Spaces found. This macOS version may be unsupported." : nil)
-            : "Could not load SkyLight. This macOS version may be unsupported."
+            ? (groups.isEmpty ? AppLanguage.ui("Spaceが見つかりません。このmacOSには未対応の可能性があります。", "No Spaces found. This macOS version may be unsupported.") : nil)
+            : AppLanguage.ui("Space情報を取得できません。このmacOSには未対応の可能性があります。", "Couldn't read Spaces. This macOS version may be unsupported.")
         if !allResultIDs.contains(selectedID ?? "") {
             selectedID = allResultIDs.first
         }
@@ -393,7 +393,7 @@ final class SearchState: ObservableObject {
             activate(space)
         } else {
             SpaceSwitchDiagnostics.record("ui-activate aborted: stale selected result")
-            errorMessage = "選択したSpaceが検索結果から消えました。候補を選び直してください。"
+            errorMessage = AppLanguage.ui("選択したSpaceが見つかりません。選び直してください。", "The selected Space is no longer available. Select it again.")
             selectedIDReset()
         }
     }
@@ -475,7 +475,7 @@ final class SearchState: ObservableObject {
         commitPendingKeyword()
         guard let identity = liveEditingIdentity() else {
             cancelEdit()
-            errorMessage = "編集中のSpaceが見つかりません。検索一覧を更新してください。"
+            errorMessage = AppLanguage.ui("Spaceが見つかりません。一覧を更新してください。", "Space not found. Refresh the list.")
             return
         }
         labels.update(identity, name: nameDraft, tags: tagsDraft)
@@ -554,7 +554,7 @@ private struct SpaceTag: View {
         .padding(.vertical, design == .pureMonochrome || design == .macOSNative ? 1 : 3)
         .background(Color.secondary.opacity(design == .pureMonochrome || design == .macOSNative
             ? 0 : (isAutomatic ? 0.06 : 0.11)), in: Capsule())
-        .help(isAutomatic ? "このSpace内のアプリから自動取得（保存されません）" : "登録した検索タグ")
+        .help(isAutomatic ? AppLanguage.ui("アプリから自動取得", "Detected app (automatic)") : AppLanguage.ui("登録した検索タグ", "Saved search tag"))
     }
 }
 
