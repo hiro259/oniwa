@@ -929,6 +929,8 @@ final class SpaceSwitcher {
                                 "瞬時切り替え後の状態が不明、またはSpace/モニターが変化しました。"
                                 + "二重移動を避けるためキーボードは送信せず中断しました。"))
                         }
+                    }
+                }
 
                 // Keyboard after a gesture failure is limited to this
                 // activation. For a pair, the callback keeps its remaining
