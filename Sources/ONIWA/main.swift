@@ -550,9 +550,9 @@ private struct SpaceTag: View {
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
-        .padding(.horizontal, design == .pureMonochrome ? 2 : 7)
-        .padding(.vertical, design == .pureMonochrome ? 1 : 3)
-        .background(Color.secondary.opacity(design == .pureMonochrome
+        .padding(.horizontal, design == .pureMonochrome || design == .macOSNative ? 2 : 7)
+        .padding(.vertical, design == .pureMonochrome || design == .macOSNative ? 1 : 3)
+        .background(Color.secondary.opacity(design == .pureMonochrome || design == .macOSNative
             ? 0 : (isAutomatic ? 0.06 : 0.11)), in: Capsule())
         .help(isAutomatic ? "このSpace内のアプリから自動取得（保存されません）" : "登録した検索タグ")
     }
@@ -610,6 +610,15 @@ struct SearchView: View {
     @State private var draggingOrderKey: String?
     @State private var hoveredItemID: String?
 
+    private var sortTitle: String {
+        switch state.sortMode {
+        case .recent: return "最近使った順"
+        case .original: return "元の並び"
+        case .name: return "名前順"
+        case .custom: return "自由に並べる"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: design.stackSpacing) {
             HStack(alignment: .center) {
@@ -657,21 +666,37 @@ struct SearchView: View {
                     .onSubmit { state.activateSelected() }
             }
             HStack(spacing: 6) {
-                Text("並び替え")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("並び替え", selection: Binding(
-                    get: { state.sortMode },
-                    set: { state.changeSortMode($0) }
-                )) {
-                    Text("最近使った順").tag(SpaceListSortMode.recent)
-                    Text("元の並び").tag(SpaceListSortMode.original)
-                    Text("名前順").tag(SpaceListSortMode.name)
-                    Text("自由に並べる").tag(SpaceListSortMode.custom)
+                if design == .macOSNative {
+                    Menu {
+                        Button("最近使った順") { state.changeSortMode(.recent) }
+                        Button("元の並び") { state.changeSortMode(.original) }
+                        Button("名前順") { state.changeSortMode(.name) }
+                        Button("自由に並べる") { state.changeSortMode(.custom) }
+                    } label: {
+                        Label(sortTitle, systemImage: "arrow.up.arrow.down")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .accessibilityLabel("並び替え: \(sortTitle)")
+                } else {
+                    Text("並び替え")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("並び替え", selection: Binding(
+                        get: { state.sortMode },
+                        set: { state.changeSortMode($0) }
+                    )) {
+                        Text("最近使った順").tag(SpaceListSortMode.recent)
+                        Text("元の並び").tag(SpaceListSortMode.original)
+                        Text("名前順").tag(SpaceListSortMode.name)
+                        Text("自由に並べる").tag(SpaceListSortMode.custom)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 170)
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 170)
                 Spacer()
                 if state.canReorderByDrag {
                     Text("≡ をドラッグすると順番が入れ替わります")
@@ -716,7 +741,7 @@ struct SearchView: View {
                                         .foregroundStyle(.secondary)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .background(Color.secondary.opacity(design == .pureMonochrome
+                                        .background(Color.secondary.opacity(design == .pureMonochrome || design == .macOSNative
                                             ? 0 : 0.10), in: Capsule())
                                     if isCurrent {
                                         Label("current", systemImage: "checkmark.circle.fill")
@@ -831,7 +856,7 @@ struct SearchView: View {
                                             .foregroundStyle(.secondary)
                                             .padding(.horizontal, 7)
                                             .padding(.vertical, 3)
-                                            .background(Color.secondary.opacity(design == .pureMonochrome
+                                            .background(Color.secondary.opacity(design == .pureMonochrome || design == .macOSNative
                                                 ? 0 : 0.09), in: Capsule())
                                             .fixedSize()
                                             .help("このモニターで現在表示されているSpace")
