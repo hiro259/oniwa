@@ -156,8 +156,18 @@ enum SwitchModeSettings {
                 missionControl: MissionControlDirectSettings.enabled,
                 hybrid: MissionControlPairHybridSettings.enabled)
         }
-        // This experiment accepted two AXPress calls but often moved only one
-        // display. Keep it unreachable even if an old preference was saved.
+        // The 50ms Control+Arrow burst is now ONIWA's STANDARD Space switcher,
+        // not an opt-in experiment. On normal builds reset any previously
+        // persisted test mode; never change macOS shortcut preferences.
+        //
+        // To revive historical alternatives for diagnostics, build with
+        // -D ONIWA_LEGACY_SWITCHING_UI. Their saved modes and code are kept.
+        #if !ONIWA_LEGACY_SWITCHING_UI
+        arrowBurstExperimentMode = .ms50
+        #endif
+
+        // The pre-diagnostic one-session MC mode was known to accept both
+        // AXPress events without switching both displays.
         MissionControlPairSingleSessionSettings.enabled = false
     }
 }
