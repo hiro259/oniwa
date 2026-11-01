@@ -531,6 +531,13 @@ final class SearchState: ObservableObject {
 private struct SpaceTag: View {
     let title: String
     let isAutomatic: Bool
+    let design: PaletteDesign
+
+    init(title: String, isAutomatic: Bool, design: PaletteDesign = .nativeCalm) {
+        self.title = title
+        self.isAutomatic = isAutomatic
+        self.design = design
+    }
 
     var body: some View {
         HStack(spacing: 2) {
@@ -543,9 +550,10 @@ private struct SpaceTag: View {
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(Color.secondary.opacity(isAutomatic ? 0.06 : 0.11), in: Capsule())
+        .padding(.horizontal, design == .pureMonochrome ? 2 : 7)
+        .padding(.vertical, design == .pureMonochrome ? 1 : 3)
+        .background(Color.secondary.opacity(design == .pureMonochrome
+            ? 0 : (isAutomatic ? 0.06 : 0.11)), in: Capsule())
         .help(isAutomatic ? "このSpace内のアプリから自動取得（保存されません）" : "登録した検索タグ")
     }
 }
