@@ -1112,6 +1112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var missionControlWaitRootItem: NSMenuItem?
     private var missionControlResetWaitItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
+    private var paletteDesignItems: [PaletteDesign: NSMenuItem] = [:]
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Adopt independent, exclusive single/pair selections once.
@@ -1166,6 +1167,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         standardSwitch.toolTip = "Mission Controlを表示せず、標準ショートカットを50ms間隔で連続送信。"
             + "目的Spaceへの到達と全モニターの安定性を確認します。"
         menu.addItem(standardSwitch)
+
+        let designRoot = NSMenuItem(
+            title: "検索パレットのデザイン", action: nil, keyEquivalent: "")
+        let designMenu = NSMenu(title: "検索パレットのデザイン")
+        let activeDesign = PaletteDesign.selected()
+        for option in PaletteDesign.allCases {
+            let entry = NSMenuItem(
+                title: option.title,
+                action: #selector(selectPaletteDesign(_:)),
+                keyEquivalent: "")
+            entry.representedObject = option.rawValue
+            entry.state = option == activeDesign ? .on : .off
+            entry.toolTip = option.detail
+            entry.target = self
+            paletteDesignItems[option] = entry
+            designMenu.addItem(entry)
+        }
+        designRoot.submenu = designMenu
+        menu.addItem(designRoot)
 
         #if ONIWA_LEGACY_SWITCHING_UI
         // Archived experiment UI: opt in at build time only.
@@ -1612,6 +1632,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    @objc private func selectPaletteDesign(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let choice = PaletteDesign(rawValue: raw) else { return }
+        choice.persist()
+        for (design, item) in paletteDesignItems {
+            item.state = design == choice ? .on : .off
+        }
+        // SearchView observes the same preference through @AppStorage, so
+        // results, current selection, query and keyboard routing are retained.
+        panel?.setContentSize(NSSize(width: choice.panelSize.width,
+                                     height: choice.panelSize.height))
+        if panel?.isVisible == true { panel?.center() }
+    }
+
     @objc private func openSwitchLog() {
         let url = SpaceSwitchDiagnostics.logURL
         if FileManager.default.fileExists(atPath: url.path) {
@@ -1708,7 +1742,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state.refresh()
         }
         if panel == nil {
-            let window = SearchPanel(contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
+            let preferred = PaletteDesign.selected().panelSize
+            let window = SearchPanel(contentRect: NSRect(
+                x: 0, y: 0, width: preferred.width, height: preferred.height),
                                      styleMask: [.titled, .fullSizeContentView],
                                      backing: .buffered, defer: false)
             window.title = "ONIWA"
