@@ -19,21 +19,21 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 
 ## Search palette design presets (Issue #12 — preview)
 
-ONIWA's `庭 → 検索パレットのデザイン` menu offers five visual presets. The change is **presentation-only**; changing styles does not alter search results, Space targets, pinned order, saved labels or the standard 50ms Space-switching route.
+ONIWA's `庭 → 検索パレットのデザイン` menu offers **seven** locally persisted visual presets. These options only affect presentation and do not alter the 50ms Space switching route, query matching, current selection, pinned order or saved Space/pair identities.
 
-| Preset | Focus |
-|---|---|
-| **Native Calm** (default) | Restrained macOS-native hierarchy and neutral current indicators |
-| **Frosted Focus** | Translucent material around search controls, larger rounding and light surfaces |
-| **Command Compact** | Small, dense keyboard-first command palette |
-| **Studio Cards** | Spacious, card-like rows and bigger project names |
-| **Monitor Focus** | Clearer per-monitor labels and two-display set cues |
+| # | Preset | Design focus |
+|---|---|---|
+| 1 | Native Calm (default) | Restrained native macOS style |
+| 2 | Frosted Focus | Material-backed translucent controls |
+| 3 | Command Compact | Dense, keyboard-first palette |
+| 4 | Studio Cards | Larger, spacious workspace cards |
+| 5 | Monitor Focus | Clearer per-display and pair cues |
+| **6** | **Modern Precision** | Raycast/Linear-inspired refinement: custom slim search outline, quiet focus glow, subtly graded and translucent row surfaces, smooth hover/selection, restrained indigo accents |
+| **7** | **Pure Monochrome** | Apple-native minimalism: more whitespace, visual hierarchy through text, no routine row borders or tag pill backgrounds, thin selection marker and selective accent |
 
-Each option adjusts typography, panel size, density, insets, corners, and row/monitor accents as applicable. The choice persists locally using `oniwa.paletteDesign` (UserDefaults); unknown values revert to Native Calm. Existing editing sheets, Japanese IME, `↑ ↓ Enter Esc` shortcuts and real Space switching keep the same behavior.
+The selection persists in `oniwa.paletteDesign` (UserDefaults); unknown values fall back to Native Calm. For presets 6 and 7, the search field uses a plain input instead of the standard AppKit-blue rounded focus ring. Native semantic colors support light/dark appearances, while old macOS 13 remains supported—no latest-OS-exclusive Liquid Glass APIs are required.
 
-This branch is a **visual comparison prototype**. Try the designs on an actual Mac in both light and dark appearance before choosing a final default and merging. No macOS 26+ exclusive Liquid Glass APIs are required, keeping the project's macOS 13 deployment target.
-
-Research and choices: [Issue #12](https://github.com/hiro259/oniwa/issues/12).
+The seven designs can be compared on a Mac without rebuilding for each selection. The UI work is in [Draft PR #16](https://github.com/hiro259/oniwa/pull/16), with detailed criteria and user feedback in [Issue #12](https://github.com/hiro259/oniwa/issues/12). **This is a visual prototype** until real-device appearance, accessibility and keyboard/IME behavior have been checked.
 
 ## First prototype
 
