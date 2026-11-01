@@ -217,6 +217,56 @@ struct PaletteHoverActions: ViewModifier {
     }
 }
 
+/// Match native text fields in the editing sheets without a thick AppKit
+/// focus border. Kept theme-local so the seven original presets do not change.
+struct NativeSheetFieldSurface: ViewModifier {
+    let enabled: Bool
+    let isFocused: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            content
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 8)
+                .background {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color(nsColor: .controlBackgroundColor))
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(isFocused
+                            ? Color.accentColor.opacity(0.36)
+                            : Color.primary.opacity(0.10), lineWidth: 1)
+                        .allowsHitTesting(false)
+                }
+                .animation(.easeOut(duration: 0.14), value: isFocused)
+        } else {
+            content
+        }
+    }
+}
+
+/// Opt in to native button chrome only for macOS Native sheets.
+struct NativeSheetActionStyle: ViewModifier {
+    let enabled: Bool
+    var prominent = false
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if enabled {
+            if prominent {
+                content.buttonStyle(.borderedProminent)
+            } else {
+                content.buttonStyle(.bordered)
+            }
+        } else {
+            content
+        }
+    }
+}
+
 /// Replaces AppKit's thick blue text-field focus ring for refined
 /// designs. The macOS Native preset has a separate borderless treatment.
 struct RefinedSearchSurface: ViewModifier {
@@ -292,9 +342,15 @@ struct PaletteRowSurface: ViewModifier {
             let opacity = isSelected ? 0.105 : (isHovered ? 0.055 : (isCurrent ? 0.035 : 0))
             stops = [Color.secondary.opacity(opacity), Color.secondary.opacity(opacity)]
         case .macOSNative:
-            // No resting cards: only an understated selection/hover affordance.
-            let opacity = isSelected ? 0.09 : (isHovered ? 0.04 : 0)
-            stops = [Color.primary.opacity(opacity), Color.primary.opacity(opacity)]
+            // The native highlight spans the whole row; no vertical accent bar.
+            // A subtle hover shade remains visible when a row is not selected.
+            if isSelected {
+                stops = [Color.accentColor.opacity(0.105),
+                         Color.accentColor.opacity(0.105)]
+            } else {
+                let shade = Color.primary.opacity(isHovered ? 0.045 : 0)
+                stops = [shade, shade]
+            }
         default:
             let color = isSelected ? Color.accentColor.opacity(design.selectedOpacity)
                 : (isCurrent ? Color.secondary.opacity(0.055) : design.idleColor)
@@ -326,7 +382,7 @@ struct PaletteRowSurface: ViewModifier {
                     .allowsHitTesting(false)
             }
             .overlay(alignment: .leading) {
-                if (design == .pureMonochrome || design == .macOSNative) && isSelected {
+                if design == .pureMonochrome && isSelected {
                     Capsule()
                         .fill(design.controlAccent)
                         .frame(width: 2, height: 21)
