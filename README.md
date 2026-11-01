@@ -36,6 +36,14 @@ The selection persists in `oniwa.paletteDesign` (UserDefaults); unknown values f
 
 The eight designs can be compared on a Mac without rebuilding for each selection. The UI work is in [Draft PR #16](https://github.com/hiro259/oniwa/pull/16), with detailed criteria and user feedback in [Issue #12](https://github.com/hiro259/oniwa/issues/12). The eighth design also uses a transparent NSPanel backing to reveal genuine ultra-thin material, and exposes row actions through a context menu when they are visually hidden. Its selected row uses a subdued full-width accent fill (without a left accent stripe), drag handles are visible only for the selected row, and pin symbols stay neutral. Editing sheets use macOS system-adaptive backgrounds, plain fields with restrained focus outlines, and system bordered/primary actions. macOS sheet translucency is not supported by the OS, so the editing sheets intentionally use the native system window background instead of claiming real frosted-glass transparency. **This is a visual prototype** until real-device appearance, accessibility and keyboard/IME behavior have been checked.
 
+## UI copy and bilingual display (Issue #12 — preview)
+
+The search palette, Space/tag editor, paired-Space editor, main menu, and normal diagnostics now have shorter Japanese wording and an English alternative. Switch via **庭 → 言語 → 日本語 / English** (English: **ONIWA menu → Language → Japanese / English**). The choice is saved to `UserDefaults` at `oniwa.interfaceLanguage`, applied immediately through SwiftUI `@AppStorage`, and kept after restart. The menu updates without restarting the app or re-registering its global hotkey. Existing installations continue to default to Japanese.
+
+The app does not translate user-authored Space names, tag text, or paired-Space names. It only localizes interface copy. The `macOS Native` theme remains one of eight independent visual presets. Its selected and hovered row controls, switching engine, search ranking, saved tags, and Space identities are unchanged. New `AppLanguageTests` verify both languages, defaults, and persistence.
+
+Mac manual checks before merge: switch languages with the search palette open and while an editor sheet is visible; check menus, sorting, help, names and tags, font fit, display labels, restart persistence, keyboard/IME, and both visual appearances. Experimental archived switching menus behind `ONIWA_LEGACY_SWITCHING_UI` remain developer-only.
+
 ## First prototype
 
 - **New installations:** `⌥ Option + Space` opens the search palette by default. Existing installations retain their previously selected shortcut until changed. The menu-bar **庭** remains the fallback if a combination is intercepted by macOS.
