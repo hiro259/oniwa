@@ -557,6 +557,26 @@ final class SpaceSwitcher {
         for (id, destination) in alreadyConfirmed {
             expectedIDs[id] = destination
         }
+        // A system hotkey can be delivered late. Before any arrow-key
+        // correction, check the complete monitor map twice with an extra
+        // delay. Never race a pending direct navigation.
+        let early = SpaceReader.shared.displays(includeAppNames: false)
+        Thread.sleep(forTimeInterval: 0.65)
+        let later = SpaceReader.shared.displays(includeAppNames: false)
+        guard currentSpaceIDs(early) == expectedIDs,
+              currentSpaceIDs(later) == expectedIDs,
+              early.count == baseline.count, later.count == baseline.count,
+              baseline.allSatisfy({ old in
+                  early.first(where: { $0.id == old.id })?
+                      .spaces.map(\.identity) == old.spaces.map(\.identity)
+                      && later.first(where: { $0.id == old.id })?
+                          .spaces.map(\.identity) == old.spaces.map(\.identity)
+              }) else {
+            SpaceSwitchDiagnostics.record(
+                "desktop-number trial=\(trial) fallback-abort late-change")
+            return .failure(SwitchFailure(
+                "番号指定キーの遅延変化を検出しました。二重操作を避けるため停止します。"))
+        }
         for displayID in missing {
             let before = SpaceReader.shared.displays(includeAppNames: false)
             guard currentSpaceIDs(before) == expectedIDs,
