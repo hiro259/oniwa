@@ -600,7 +600,7 @@ struct SearchView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isTagInputFocused: Bool
     @State private var draggingOrderKey: String?
-
+    @State private var hoveredItemID: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: design.stackSpacing) {
@@ -619,19 +619,35 @@ struct SearchView: View {
                     .foregroundStyle(.secondary)
                     .font(.caption)
             }
-            TextField("Space・セット・タグを検索…", text: $state.query)
-                .textFieldStyle(.roundedBorder)
-                .font(design.searchFont)
-                .controlSize(design == .commandCompact ? .small : .regular)
-                .padding(.vertical, design.hasMaterialSurface ? 4 : 0)
-                .padding(.horizontal, design.hasMaterialSurface ? 5 : 0)
-                .background {
-                    if design.hasMaterialSurface {
-                        RoundedRectangle(cornerRadius: 11).fill(.regularMaterial)
-                    }
+            if design.isRefined {
+                HStack(spacing: 11) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    TextField("Space・セット・タグを検索…", text: $state.query)
+                        .textFieldStyle(.plain)
+                        .font(design.searchFont)
+                        .focused($isSearchFocused)
+                        .onSubmit { state.activateSelected() }
+                        .accessibilityLabel("Space・セット・タグを検索")
                 }
-                .focused($isSearchFocused)
-                .onSubmit { state.activateSelected() }
+                .modifier(RefinedSearchSurface(design: design, isFocused: isSearchFocused))
+            } else {
+                TextField("Space・セット・タグを検索…", text: $state.query)
+                    .textFieldStyle(.roundedBorder)
+                    .font(design.searchFont)
+                    .controlSize(design == .commandCompact ? .small : .regular)
+                    .padding(.vertical, design.hasMaterialSurface ? 4 : 0)
+                    .padding(.horizontal, design.hasMaterialSurface ? 5 : 0)
+                    .background {
+                        if design.hasMaterialSurface {
+                            RoundedRectangle(cornerRadius: 11).fill(.regularMaterial)
+                        }
+                    }
+                    .focused($isSearchFocused)
+                    .onSubmit { state.activateSelected() }
+            }
             HStack(spacing: 6) {
                 Text("並び替え")
                     .font(.caption)
@@ -669,7 +685,8 @@ struct SearchView: View {
                         let isCurrent = destination.map { $0.0.isCurrent && $0.1.isCurrent } ?? false
                         HStack(spacing: design == .studioCards ? 13 : 9) {
                             Image(systemName: "square.on.square")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(design.isRefined && state.pairResultID(pair) == state.selectedID
+                                    ? design.controlAccent : Color.secondary)
                                 .frame(width: design.leadingIconWidth)
                                 .padding(.vertical, design == .studioCards ? 8 : 0)
                                 .background {
@@ -683,14 +700,16 @@ struct SearchView: View {
                                     Text(pair.name)
                                         .font(design.titleFont)
                                         .fontWeight(state.pairResultID(pair) == state.selectedID
-                                            || isCurrent ? .semibold : .regular)
+                                            || isCurrent ? .semibold : (design == .modernPrecision
+                                                ? .medium : .regular))
                                         .lineLimit(1)
                                     Text("セット")
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                                        .background(Color.secondary.opacity(design == .pureMonochrome
+                                            ? 0 : 0.10), in: Capsule())
                                     if isCurrent {
                                         Label("current", systemImage: "checkmark.circle.fill")
                                             .font(.caption2)
@@ -731,7 +750,7 @@ struct SearchView: View {
                             } label: {
                                 Image(systemName: state.isPinned(pair) ? "pin.fill" : "pin")
                                     .foregroundStyle(state.isPinned(pair)
-                                        ? Color.accentColor : Color.secondary)
+                                        ? design.controlAccent : Color.secondary)
                             }
                             .buttonStyle(.borderless)
                             .help(state.isPinned(pair) ? "ピン留めを解除" : "一覧の先頭にピン留め")
@@ -747,22 +766,25 @@ struct SearchView: View {
                         }
                         .padding(.horizontal, design.rowHorizontalPadding)
                         .padding(.vertical, design.rowVerticalPadding)
-                        .background(state.pairResultID(pair) == state.selectedID
-                            ? Color.accentColor.opacity(design.selectedOpacity)
-                            : (isCurrent ? Color.secondary.opacity(0.055) : design.idleColor))
-                        .clipShape(RoundedRectangle(cornerRadius: design.rowCornerRadius))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: design.rowCornerRadius)
-                                .strokeBorder(isCurrent ? Color.secondary.opacity(0.40) : Color.clear,
-                                              lineWidth: 1)
-                                .allowsHitTesting(false)
-                        }
+                        .modifier(PaletteRowSurface(
+                            design: design,
+                            isSelected: state.pairResultID(pair) == state.selectedID,
+                            isCurrent: isCurrent,
+                            isHovered: hoveredItemID == state.pairResultID(pair)))
                         .contentShape(Rectangle())
                         .onTapGesture {
                             if state.selectedID == state.pairResultID(pair) {
                                 state.activatePair(pair)
                             } else {
                                 state.selectedID = state.pairResultID(pair)
+                            }
+                        }
+                        .onHover { hovering in
+                            guard design.isRefined else { return }
+                            if hovering {
+                                hoveredItemID = state.pairResultID(pair)
+                            } else if hoveredItemID == state.pairResultID(pair) {
+                                hoveredItemID = nil
                             }
                         }
                         .id(state.pairResultID(pair))
@@ -775,7 +797,8 @@ struct SearchView: View {
                         case .space(let space):
                         HStack(spacing: design == .studioCards ? 13 : 9) {
                             Image(systemName: space.kind == 4 ? "arrow.up.left.and.arrow.down.right" : "display")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(design.isRefined && space.id == state.selectedID
+                                    ? design.controlAccent : Color.secondary)
                                 .frame(width: design.leadingIconWidth)
                                 .padding(.vertical, design == .studioCards ? 8 : 0)
                                 .background {
@@ -791,7 +814,8 @@ struct SearchView: View {
                                          : space.defaultName)
                                         .font(design.titleFont)
                                         .fontWeight(space.id == state.selectedID || space.isCurrent
-                                            ? .semibold : .regular)
+                                            ? .semibold : (design == .modernPrecision
+                                                ? .medium : .regular))
                                         .lineLimit(1)
                                     if space.isCurrent {
                                         Label("current", systemImage: "checkmark.circle.fill")
@@ -799,7 +823,8 @@ struct SearchView: View {
                                             .foregroundStyle(.secondary)
                                             .padding(.horizontal, 7)
                                             .padding(.vertical, 3)
-                                            .background(Color.secondary.opacity(0.09), in: Capsule())
+                                            .background(Color.secondary.opacity(design == .pureMonochrome
+                                                ? 0 : 0.09), in: Capsule())
                                             .fixedSize()
                                             .help("このモニターで現在表示されているSpace")
                                     }
@@ -825,10 +850,10 @@ struct SearchView: View {
                                 if !manualTags.isEmpty || !appTags.isEmpty {
                                     HStack(spacing: 4) {
                                         ForEach(Array(manualTags.prefix(2)), id: \.self) { tag in
-                                            SpaceTag(title: tag, isAutomatic: false)
+                                            SpaceTag(title: tag, isAutomatic: false, design: design)
                                         }
                                         ForEach(Array(appTags.prefix(2)), id: \.self) { app in
-                                            SpaceTag(title: app, isAutomatic: true)
+                                            SpaceTag(title: app, isAutomatic: true, design: design)
                                         }
                                         let extra = max(0, manualTags.count - 2)
                                             + max(0, appTags.count - 2)
@@ -856,7 +881,7 @@ struct SearchView: View {
                             } label: {
                                 Image(systemName: state.isPinned(space) ? "pin.fill" : "pin")
                                     .foregroundStyle(state.isPinned(space)
-                                        ? Color.accentColor : Color.secondary)
+                                        ? design.controlAccent : Color.secondary)
                             }
                             .buttonStyle(.borderless)
                             .disabled(space.identity.persistentKey == nil)
@@ -875,21 +900,24 @@ struct SearchView: View {
                         }
                         .padding(.horizontal, design.rowHorizontalPadding)
                         .padding(.vertical, design.rowVerticalPadding)
-                        // Selection remains an accent tint; current is always neutral.
-                        .background(space.id == state.selectedID
-                            ? Color.accentColor.opacity(design.selectedOpacity)
-                            : (space.isCurrent ? Color.secondary.opacity(0.055) : design.idleColor))
-                        .clipShape(RoundedRectangle(cornerRadius: design.rowCornerRadius))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: design.rowCornerRadius)
-                                .strokeBorder(space.isCurrent ? Color.secondary.opacity(0.40) : Color.clear,
-                                              lineWidth: 1)
-                                .allowsHitTesting(false)
-                        }
+                        // Neutral current state differs from keyboard selection.
+                        .modifier(PaletteRowSurface(
+                            design: design,
+                            isSelected: space.id == state.selectedID,
+                            isCurrent: space.isCurrent,
+                            isHovered: hoveredItemID == space.id))
                         .contentShape(Rectangle())
                         .onTapGesture {
                             if state.selectedID == space.id { state.activate(space) }
                             else { state.selectedID = space.id }
+                        }
+                        .onHover { hovering in
+                            guard design.isRefined else { return }
+                            if hovering {
+                                hoveredItemID = space.id
+                            } else if hoveredItemID == space.id {
+                                hoveredItemID = nil
+                            }
                         }
                         .id(space.id)
                         .onDrop(
@@ -934,6 +962,12 @@ struct SearchView: View {
             }
         }
         .onAppear { isSearchFocused = true }
+        .onChange(of: paletteRaw) { _ in
+            // The text field is replaced when changing between legacy/refined
+            // appearances; restore keyboard-first search immediately.
+            isSearchFocused = true
+            hoveredItemID = nil
+        }
         .onChange(of: state.query) { _ in state.selectedID = state.allResultIDs.first }
         .onChange(of: state.orderingRevision) { _ in
             if !state.allResultIDs.contains(state.selectedID ?? "") {
