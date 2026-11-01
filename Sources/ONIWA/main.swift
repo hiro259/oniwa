@@ -1095,7 +1095,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutMenu.addItem(recorderItem)
         shortcutRoot.submenu = shortcutMenu
         menu.addItem(shortcutRoot)
-        // This experiment is independent from the two existing 3-choice menus.
+        // ONIWA standard: the verified 50ms Control+Arrow burst.
+        // Keep the old switching UI in source for OS regression research,
+        // but do not offer its experimental controls to ordinary users.
+        let standardSwitch = NSMenuItem(
+            title: "切り替え方式：⌃←/→ 高速連打（50ms・標準）",
+            action: nil, keyEquivalent: "")
+        standardSwitch.isEnabled = false
+        standardSwitch.toolTip = "Mission Controlを表示せず、標準ショートカットを50ms間隔で連続送信。"
+            + "目的Spaceへの到達と全モニターの安定性を確認します。"
+        menu.addItem(standardSwitch)
+
+        #if ONIWA_LEGACY_SWITCHING_UI
+        // Archived experiment UI: opt in at build time only.
+        // The implementation paths and persisted experiment settings remain.
         // Both saved modes are suspended while it is ON, not overwritten.
         let globalInstant = NSMenuItem(
             title: "全画面：実験的な瞬時切り替え（優先）",
@@ -1265,6 +1278,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         detailRoot.submenu = detailMenu
         menu.addItem(detailRoot)
         updateMissionControlWaitMenuState()
+        #endif
+
+        menu.addItem(NSMenuItem.separator())
         let diagnosis = NSMenuItem(title: "ショートカット診断…",
                                    action: #selector(showShortcutDiagnosis),
                                    keyEquivalent: "")
