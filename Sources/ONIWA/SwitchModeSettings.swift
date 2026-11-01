@@ -4,7 +4,29 @@ import ONIWACore
 /// A single persisted value per UI group replaces the old overlapping
 /// Boolean mode toggles. Readers also use a deterministic legacy fallback
 /// before app launch has completed the one-time migration.
+enum DesktopNumberExperimentMode: String {
+    case off
+    case rapid
+    case sequential
+}
+
 enum SwitchModeSettings {
+    static let desktopNumberModeKey = "oniwa.desktopNumberExperimentMode"
+
+    static var desktopNumberExperimentMode: DesktopNumberExperimentMode {
+        get {
+            DesktopNumberExperimentMode(
+                rawValue: UserDefaults.standard.string(forKey: desktopNumberModeKey) ?? ""
+            ) ?? .off
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: desktopNumberModeKey)
+            if newValue != .off {
+                UserDefaults.standard.set(false, forKey: globalInstantExperimentKey)
+                UserDefaults.standard.set(false, forKey: globalMCOneSessionExperimentKey)
+            }
+        }
+    }
     static let singleKey = "oniwa.singleSpaceSwitchMode"
     static let pairKey = "oniwa.pairSpaceSwitchMode"
 
@@ -24,6 +46,8 @@ enum SwitchModeSettings {
             UserDefaults.standard.set(newValue, forKey: globalInstantExperimentKey)
             if newValue {
                 UserDefaults.standard.set(false, forKey: globalMCOneSessionExperimentKey)
+                UserDefaults.standard.set(DesktopNumberExperimentMode.off.rawValue,
+                                          forKey: desktopNumberModeKey)
             }
         }
     }
@@ -34,6 +58,8 @@ enum SwitchModeSettings {
             UserDefaults.standard.set(newValue, forKey: globalMCOneSessionExperimentKey)
             if newValue {
                 UserDefaults.standard.set(false, forKey: globalInstantExperimentKey)
+                UserDefaults.standard.set(DesktopNumberExperimentMode.off.rawValue,
+                                          forKey: desktopNumberModeKey)
             }
         }
     }
@@ -47,6 +73,7 @@ enum SwitchModeSettings {
 
     static var anyGlobalExperimentEnabled: Bool {
         globalInstantExperimentEnabled || globalMCOneSessionExperimentEnabled
+            || desktopNumberExperimentMode != .off
     }
 
     static var single: SingleSpaceSwitchMode {
