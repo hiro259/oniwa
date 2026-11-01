@@ -1045,6 +1045,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var globalInstantExperimentItem: NSMenuItem?
     private var globalMCOneSessionExperimentItem: NSMenuItem?
     private var desktopNumberExperimentItems: [DesktopNumberExperimentMode: NSMenuItem] = [:]
+    private var arrowBurstExperimentItems: [ArrowBurstExperimentMode: NSMenuItem] = [:]
     private var mcReverseOrderItem: NSMenuItem?
     private var instantPacingItem: NSMenuItem?
     private var missionControlWaitRootItem: NSMenuItem?
@@ -1118,6 +1119,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mcOneSession.target = self
         globalMCOneSessionExperimentItem = mcOneSession
         menu.addItem(mcOneSession)
+
+        for (mode, title) in [
+            (ArrowBurstExperimentMode.ms100,
+             "全画面：⌃←/→ 高速連打 100ms（実験・優先）"),
+            (.ms50,
+             "全画面：⌃←/→ 高速連打 50ms（実験・優先）")
+        ] {
+            let entry = NSMenuItem(
+                title: title,
+                action: #selector(selectArrowBurstExperiment(_:)),
+                keyEquivalent: "")
+            entry.representedObject = mode.rawValue
+            entry.state = SwitchModeSettings.arrowBurstExperimentMode == mode
+                ? .on : .off
+            entry.toolTip = "連続したSpaceへControl+矢印を100msまたは50ms間隔で送信します。"
+                + "途中のSpaceを毎回待たず、最後にSpace IDと全画面の安定性を検証。"
+                + "フルスクリーンSpaceも対象。異常時は追加のキーを送らず停止します。"
+                + "セットでは1画面の到達確認後に2画面目へ移動します。"
+            entry.target = self
+            arrowBurstExperimentItems[mode] = entry
+            menu.addItem(entry)
+        }
 
         for (mode, title) in [
             (DesktopNumberExperimentMode.rapid,
@@ -1291,6 +1314,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let instant = SwitchModeSettings.globalInstantExperimentEnabled
         let mc = SwitchModeSettings.globalMCOneSessionExperimentEnabled
         let numbered = SwitchModeSettings.desktopNumberExperimentMode
+        let burst = SwitchModeSettings.arrowBurstExperimentMode
+        for (mode, item) in arrowBurstExperimentItems {
+            item.state = burst == mode ? .on : .off
+        }
         for (mode, item) in desktopNumberExperimentItems {
             item.state = numbered == mode ? .on : .off
         }
@@ -1332,6 +1359,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         refreshGlobalExperimentMenuState()
         SpaceSwitchDiagnostics.record(
             "desktop-number setting mode=\(SwitchModeSettings.desktopNumberExperimentMode.rawValue)"
+            + " mc-one=\(SwitchModeSettings.globalMCOneSessionExperimentEnabled)"
+            + " instant=\(SwitchModeSettings.globalInstantExperimentEnabled)")
+    }
+
+    @objc private func selectArrowBurstExperiment(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let selected = ArrowBurstExperimentMode(rawValue: raw),
+              selected != .off else { return }
+        SwitchModeSettings.arrowBurstExperimentMode =
+            SwitchModeSettings.arrowBurstExperimentMode == selected ? .off : selected
+        refreshGlobalExperimentMenuState()
+        SpaceSwitchDiagnostics.record(
+            "arrow-burst setting mode=\(SwitchModeSettings.arrowBurstExperimentMode.rawValue)"
+            + " intervalMs=\(SwitchModeSettings.arrowBurstExperimentMode.intervalMS)"
+            + " numbered=\(SwitchModeSettings.desktopNumberExperimentMode.rawValue)"
             + " mc-one=\(SwitchModeSettings.globalMCOneSessionExperimentEnabled)"
             + " instant=\(SwitchModeSettings.globalInstantExperimentEnabled)")
     }
