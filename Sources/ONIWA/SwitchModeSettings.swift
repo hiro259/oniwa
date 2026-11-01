@@ -8,6 +8,16 @@ enum SwitchModeSettings {
     static let singleKey = "oniwa.singleSpaceSwitchMode"
     static let pairKey = "oniwa.pairSpaceSwitchMode"
 
+    /// Global, separately persisted experiment. When ON it overrides both
+    /// independent 3-choice menus, without replacing their saved selections.
+    /// The flag is never disabled by an individual failed gesture.
+    static let globalInstantExperimentKey = "oniwa.globalInstantExperimentEnabled"
+
+    static var globalInstantExperimentEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: globalInstantExperimentKey) }
+        set { UserDefaults.standard.set(newValue, forKey: globalInstantExperimentKey) }
+    }
+
     static var single: SingleSpaceSwitchMode {
         get {
             if let value = UserDefaults.standard.string(forKey: singleKey),
