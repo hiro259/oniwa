@@ -612,6 +612,12 @@ struct SearchView: View {
     @State private var draggingOrderKey: String?
     @State private var hoveredItemID: String?
 
+    /// macOS Native keeps the same row controls visible for keyboard selection
+    /// and pointer hover, including when they refer to different rows.
+    private func showsRowControls(for id: String) -> Bool {
+        design != .macOSNative || state.selectedID == id || hoveredItemID == id
+    }
+
     private var sortTitle: String {
         switch state.sortMode {
         case .recent: return "最近使った順"
@@ -773,16 +779,15 @@ struct SearchView: View {
                             if state.canReorderByDrag {
                                 Image(systemName: "line.3.horizontal")
                                     .foregroundStyle(.secondary)
-                                    .help("選択した行をドラッグして表示順を変更")
+                                    .help("ドラッグして表示順を変更")
                                     .onDrag {
                                         draggingOrderKey = "pair:\(pair.id.uuidString)"
                                         return NSItemProvider(
                                             object: "pair:\(pair.id.uuidString)" as NSString)
                                     }
-                                    .opacity(design != .macOSNative
-                                        || state.pairResultID(pair) == state.selectedID ? 1 : 0)
-                                    .allowsHitTesting(design != .macOSNative
-                                        || state.pairResultID(pair) == state.selectedID)
+                                    .modifier(PaletteHoverActions(
+                                        isVisible: showsRowControls(
+                                            for: state.pairResultID(pair))))
                             }
                             HStack(spacing: 9) {
                                 Button {
@@ -807,8 +812,8 @@ struct SearchView: View {
                                 .help("セットを編集または削除")
                             }
                             .modifier(PaletteHoverActions(
-                                isVisible: design != .macOSNative
-                                    || hoveredItemID == state.pairResultID(pair)))
+                                isVisible: showsRowControls(
+                                    for: state.pairResultID(pair))))
                         }
                         .padding(.horizontal, design.rowHorizontalPadding)
                         .padding(.vertical, design.rowVerticalPadding)
@@ -924,15 +929,13 @@ struct SearchView: View {
                                let key = space.identity.persistentKey {
                                 Image(systemName: "line.3.horizontal")
                                     .foregroundStyle(.secondary)
-                                    .help("選択した行をドラッグして表示順を変更")
+                                    .help("ドラッグして表示順を変更")
                                     .onDrag {
                                         draggingOrderKey = key
                                         return NSItemProvider(object: key as NSString)
                                     }
-                                    .opacity(design != .macOSNative || space.id == state.selectedID
-                                        ? 1 : 0)
-                                    .allowsHitTesting(design != .macOSNative
-                                        || space.id == state.selectedID)
+                                    .modifier(PaletteHoverActions(
+                                        isVisible: showsRowControls(for: space.id)))
                             }
                             HStack(spacing: 9) {
                                 Button {
@@ -960,7 +963,7 @@ struct SearchView: View {
                                 .help("Rename or add aliases")
                             }
                             .modifier(PaletteHoverActions(
-                                isVisible: design != .macOSNative || hoveredItemID == space.id))
+                                isVisible: showsRowControls(for: space.id)))
                         }
                         .padding(.horizontal, design.rowHorizontalPadding)
                         .padding(.vertical, design.rowVerticalPadding)
