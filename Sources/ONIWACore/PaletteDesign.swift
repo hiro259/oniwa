@@ -1,6 +1,6 @@
 import Foundation
 
-/// Stable IDs for the seven ONIWA visual presets. This is presentation state:
+/// Stable IDs for the eight ONIWA visual presets. This is presentation state:
 /// neither Space identities nor switcher settings depend on these values.
 public enum PaletteDesign: String, CaseIterable, Identifiable {
     case nativeCalm
@@ -10,6 +10,7 @@ public enum PaletteDesign: String, CaseIterable, Identifiable {
     case monitorFocus
     case modernPrecision
     case pureMonochrome
+    case macOSNative
 
     public static let settingsKey = "oniwa.paletteDesign"
 
@@ -24,6 +25,7 @@ public enum PaletteDesign: String, CaseIterable, Identifiable {
         case .monitorFocus: return "Monitor Focus"
         case .modernPrecision: return "Modern Precision"
         case .pureMonochrome: return "Pure Monochrome"
+        case .macOSNative: return "macOS Native"
         }
     }
 
@@ -36,6 +38,7 @@ public enum PaletteDesign: String, CaseIterable, Identifiable {
         case .monitorFocus: return "モニターと2画面セットを明確に表示"
         case .modernPrecision: return "上質なグレーと繊細なガラス質感"
         case .pureMonochrome: return "余白と文字だけで整えたミニマルなUI"
+        case .macOSNative: return "すりガラスと余白を活かしたmacOS純正風パレット"
         }
     }
 
