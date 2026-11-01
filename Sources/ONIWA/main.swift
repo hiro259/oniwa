@@ -607,6 +607,8 @@ struct SearchView: View {
     private var design: PaletteDesign { PaletteDesign(rawValue: paletteRaw) ?? .nativeCalm }
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isTagInputFocused: Bool
+    @FocusState private var isNameInputFocused: Bool
+    @FocusState private var isPairNameInputFocused: Bool
     @State private var draggingOrderKey: String?
     @State private var hoveredItemID: String?
 
@@ -698,7 +700,7 @@ struct SearchView: View {
                     .frame(width: 170)
                 }
                 Spacer()
-                if state.canReorderByDrag {
+                if state.canReorderByDrag && design != .macOSNative {
                     Text("≡ をドラッグすると順番が入れ替わります")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -771,20 +773,26 @@ struct SearchView: View {
                             if state.canReorderByDrag {
                                 Image(systemName: "line.3.horizontal")
                                     .foregroundStyle(.secondary)
-                                    .help("ドラッグして表示順を変更")
+                                    .help("選択した行をドラッグして表示順を変更")
                                     .onDrag {
                                         draggingOrderKey = "pair:\(pair.id.uuidString)"
                                         return NSItemProvider(
                                             object: "pair:\(pair.id.uuidString)" as NSString)
                                     }
+                                    .opacity(design != .macOSNative
+                                        || state.pairResultID(pair) == state.selectedID ? 1 : 0)
+                                    .allowsHitTesting(design != .macOSNative
+                                        || state.pairResultID(pair) == state.selectedID)
                             }
                             HStack(spacing: 9) {
                                 Button {
                                     state.togglePin(pair)
                                 } label: {
                                     Image(systemName: state.isPinned(pair) ? "pin.fill" : "pin")
-                                        .foregroundStyle(state.isPinned(pair)
-                                            ? design.controlAccent : Color.secondary)
+                                        .foregroundStyle(design == .macOSNative
+                                            ? Color.secondary.opacity(0.78)
+                                            : (state.isPinned(pair)
+                                                ? design.controlAccent : Color.secondary))
                                 }
                                 .buttonStyle(.borderless)
                                 .help(state.isPinned(pair) ? "ピン留めを解除" : "一覧の先頭にピン留め")
@@ -916,19 +924,25 @@ struct SearchView: View {
                                let key = space.identity.persistentKey {
                                 Image(systemName: "line.3.horizontal")
                                     .foregroundStyle(.secondary)
-                                    .help("ドラッグして表示順を変更")
+                                    .help("選択した行をドラッグして表示順を変更")
                                     .onDrag {
                                         draggingOrderKey = key
                                         return NSItemProvider(object: key as NSString)
                                     }
+                                    .opacity(design != .macOSNative || space.id == state.selectedID
+                                        ? 1 : 0)
+                                    .allowsHitTesting(design != .macOSNative
+                                        || space.id == state.selectedID)
                             }
                             HStack(spacing: 9) {
                                 Button {
                                     state.togglePin(space)
                                 } label: {
                                     Image(systemName: state.isPinned(space) ? "pin.fill" : "pin")
-                                        .foregroundStyle(state.isPinned(space)
-                                            ? design.controlAccent : Color.secondary)
+                                        .foregroundStyle(design == .macOSNative
+                                            ? Color.secondary.opacity(0.78)
+                                            : (state.isPinned(space)
+                                                ? design.controlAccent : Color.secondary))
                                 }
                                 .buttonStyle(.borderless)
                                 .disabled(space.identity.persistentKey == nil)
@@ -1054,11 +1068,16 @@ struct SearchView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Spaceの名前と検索タグ").font(.headline)
                 TextField("表示名（例：趣味）", text: $state.nameDraft)
+                    .focused($isNameInputFocused)
+                    .modifier(NativeSheetFieldSurface(
+                        enabled: design == .macOSNative, isFocused: isNameInputFocused))
                 Text("検索タグ").font(.subheadline.weight(.medium))
                 TextField(state.editingTagIndex == nil
                           ? "タグを入力してEnterで追加（スペースも使用可）"
                           : "タグを編集してEnterで確定", text: $state.keywordInput)
                     .focused($isTagInputFocused)
+                    .modifier(NativeSheetFieldSurface(
+                        enabled: design == .macOSNative, isFocused: isTagInputFocused))
                     .onSubmit {
                         state.commitPendingKeyword()
                         isTagInputFocused = true
@@ -1128,14 +1147,23 @@ struct SearchView: View {
                     if state.hasEditingLabel {
                         Button("名前とタグを削除") { state.deleteLabel() }
                             .foregroundStyle(.red)
+                            .modifier(NativeSheetActionStyle(enabled: design == .macOSNative))
                     }
                     Spacer()
                     Button("キャンセル") { state.cancelEdit() }
+                        .modifier(NativeSheetActionStyle(enabled: design == .macOSNative))
                     Button("保存") { state.saveLabel() }
+                        .modifier(NativeSheetActionStyle(
+                            enabled: design == .macOSNative, prominent: true))
                 }
             }
-            .padding(20)
-            .frame(width: 380)
+            .padding(design == .macOSNative ? 24 : 20)
+            .frame(width: design == .macOSNative ? 420 : 380)
+            .background {
+                if design == .macOSNative {
+                    Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+                }
+            }
         }
         .sheet(isPresented: $state.pairEditing) {
             VStack(alignment: .leading, spacing: 14) {
@@ -1143,6 +1171,9 @@ struct SearchView: View {
                 Text("2つのモニターで同時に使うSpaceを登録します。")
                     .font(.caption).foregroundStyle(.secondary)
                 TextField("セット名（例：ONIWA開発）", text: $state.pairNameDraft)
+                    .focused($isPairNameInputFocused)
+                    .modifier(NativeSheetFieldSurface(
+                        enabled: design == .macOSNative, isFocused: isPairNameInputFocused))
                 Picker("1つ目のモニター", selection: $state.pairFirstKey) {
                     ForEach(state.pairEligibleSpaces) { space in
                         Text("\(state.monitorName(space)) · \(state.spaceName(space)) · Space \(space.index + 1)")
@@ -1166,15 +1197,24 @@ struct SearchView: View {
                 HStack {
                     if state.editingPairID != nil {
                         Button("セットを削除", role: .destructive) { state.deletePair() }
+                            .modifier(NativeSheetActionStyle(enabled: design == .macOSNative))
                     }
                     Spacer()
                     Button("キャンセル") { state.pairEditing = false }
+                        .modifier(NativeSheetActionStyle(enabled: design == .macOSNative))
                     Button("保存") { state.savePair() }
                         .disabled(!state.pairCanSave)
+                        .modifier(NativeSheetActionStyle(
+                            enabled: design == .macOSNative, prominent: true))
                 }
             }
-            .padding(20)
-            .frame(width: 460)
+            .padding(design == .macOSNative ? 24 : 20)
+            .frame(width: design == .macOSNative ? 500 : 460)
+            .background {
+                if design == .macOSNative {
+                    Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+                }
+            }
         }
     }
 
