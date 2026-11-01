@@ -86,7 +86,7 @@ Unit tests in `SpaceLabelsTests.swift` cover persistence, safe deletion, multi-m
 tail -n 80 ~/Library/Logs/ONIWA/switch.log
 ```
 
-Trace lines include Space numeric IDs, shortened display IDs, intended step, actual confirmation, and `WRONG-DISPLAY` / timeout. For mismatch diagnosis they now also include the **selected visible Space name**, its abbreviated UUID and process-level app names; `space-map` lists the display's Space IDs with their saved labels and associated process names after a completed single switch. They do **not** include typed search terms or window/browser-tab titles. These are local files, never uploaded. **Review the log before sharing**, because saved Space names and process names may be personal. For a controlled comparison, repeat the same pair with **庭 → 瞬時切り替え（試験的）** ON and OFF, recording which mode fails. This is diagnostic evidence, not a guarantee that all OS-level routing bugs are fixed.
+Trace lines include Space numeric IDs, shortened display IDs, intended step, actual confirmation, and `WRONG-DISPLAY` / timeout. For mismatch diagnosis they now also include the **selected visible Space name**, its abbreviated UUID and process-level app names; `space-map` lists the display's Space IDs with their saved labels and associated process names after a completed single switch. They do **not** include typed search terms or window/browser-tab titles. These are local files, never uploaded. **Review the log before sharing**, because saved Space names and process names may be personal. For current builds, compare `arrow-burst` and `arrow-burst-pair` trace entries with the final visible Space; old swipe experiments and menu controls are archived behind the optional `ONIWA_LEGACY_SWITCHING_UI` build flag. These traces are diagnostic evidence, not a guarantee that all OS-level routing bugs are fixed.
 **Investigating “Trello” (or any other name) opened a different Space:** after a failed single-Space selection, compare the `ui-activate single name=[...]`/space ID to the `single-settled` and `space-map` lines for that display. If the correct numeric Space was reached but Trello is associated with a different ID, the problem is labeling/app-to-Space association rather than a missed swipe. ONIWA stores saved names against Space UUIDs, **not** a dynamically moving app window or browser tab. Recent-use reordering changes display order but should not reassign a UUID-backed label. A stale selected search result now refuses activation rather than silently launching the first unrelated result. Single-Space success also requires a delayed readback of the current Space ID (850 ms).
 
 ### macOS automatic Space reordering — Trello regression (2026-10-30)
@@ -171,11 +171,9 @@ ONIWA now checks macOS key-event posting permission with `CGPreflightPostEventAc
 - The recommended hotkey is Option+Space; it may type a nonbreaking space or conflict with macOS/third-party shortcuts on some computers. Use the recorder to select another combination when needed. A successful Carbon registration does not guarantee events are delivered.
 - The draft prioritizes the search flow. Visual free-placement maps and managing windows are out of scope for v0.1.
 
-## ONIWA-only instant Space switching (experimental)
+## Archived: ONIWA-only synthetic swipe experiments (not the default)
 
-By default ONIWA attempts a near-instant Space transition **only when you
-select a Space inside ONIWA**. Menu bar **庭 → 瞬時切り替え（試験的）**
-turns this feature on or off. The setting is saved across launches.
+**Historical research only.** The earlier version of ONIWA attempted a near-instant Space transition with a synthetic Dock swipe. The user-facing swipe toggle is hidden in ordinary builds now that 50ms Control+Arrow is standard. For regression testing, compile with `ONIWA_LEGACY_SWITCHING_UI` and select an older experiment mode. See [Issue #15](https://github.com/hiro259/oniwa/issues/15) for the observed delayed Space snap-back.
 
 - Uses the Dock's near-zero-travel synthetic swipe gesture (macOS 26.6+
   and macOS 27 only), keeping focus and normal Mission Control behavior.
@@ -197,9 +195,9 @@ turns this feature on or off. The setting is saved across launches.
   [noswoosh](https://github.com/mmathys/noswoosh).
   See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-### Manual test checklist
+### Archived swipe-mode test checklist (requires the legacy build flag)
 
-1. In menu bar **庭**, keep **瞬時切り替え（試験的）** checked.
+1. In an `ONIWA_LEGACY_SWITCHING_UI` build, enable **瞬時切り替え（試験的）** in the menu.
 2. Open ONIWA, jump one Space left and one right; verify a fast transition and
    that each target is correct.
 3. Jump across several Spaces and test fullscreen Chrome/Trello, including
