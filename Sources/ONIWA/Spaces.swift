@@ -570,6 +570,30 @@ final class SpaceSwitcher {
         }
         let previous = currentSpaceIDs(snapshots[snapshots.count - 2])
         let latest = currentSpaceIDs(snapshots[snapshots.count - 1])
+        // If a target was reached and then snapped back to its initial
+        // Space, the two final samples alone could look like "unmoved".
+        // That is NOT safe grounds for another keyboard movement.
+        let reversedAfterArrival = [first, second].contains { target in
+            guard initialIDs[target.displayID] != target.systemID,
+                  latest[target.displayID] == initialIDs[target.displayID] else {
+                return false
+            }
+            return snapshots.dropLast(2).contains { snapshot in
+                currentSpaceIDs(snapshot)[target.displayID] == target.systemID
+            }
+        }
+        let unexpectedIntermediateID = snapshots.contains { snapshot in
+            let ids = currentSpaceIDs(snapshot)
+            return before.contains { old in
+                guard let actual = ids[old.id],
+                      let initial = initialIDs[old.id] else { return true }
+                if let expected = targets[old.id] {
+                    return actual != initial && actual != expected
+                }
+                return actual != initial
+            }
+        }
+        allStable = allStable && !reversedAfterArrival && !unexpectedIntermediateID
         let decision = MissionControlPairExperimentPolicy.decide(
             firstDisplay: first.displayID, secondDisplay: second.displayID,
             before: initialIDs, targets: targets,
@@ -595,8 +619,11 @@ final class SpaceSwitcher {
                 + "誤移動防止のためキーボード移動は行いません。"))
         }
 
-        // Recheck immediately before every keyboard operation; each monitor
-        // must still be either at its initial Space or at its target.
+        // Recheck immediately before every keyboard operation. When a
+        // preceding fallback changes one display, update the expected map.
+        // If any other display changes spontaneously, stop rather than
+        // interpreting a delayed MC transition as a missed click.
+        var expectedIDs = latest
         for displayID in toRepair {
             let current = reader.displays(includeAppNames: false)
             guard !MissionControlDirectSwitch.hasVisibleThumbnailLists(),
@@ -605,11 +632,7 @@ final class SpaceSwitcher {
                       current.first(where: { $0.id == original.id })?
                           .spaces.map(\.identity) == original.spaces.map(\.identity)
                   }),
-                  current.allSatisfy({ display in
-                      guard let actual = display.currentID,
-                            let initial = initialIDs[display.id] else { return false }
-                      return actual == initial || actual == targets[display.id]
-                  }),
+                  currentSpaceIDs(current) == expectedIDs,
                   current.first(where: { $0.id == displayID })?.currentID
                     == initialIDs[displayID] else {
                 SpaceSwitchDiagnostics.record(
@@ -628,6 +651,7 @@ final class SpaceSwitcher {
             switch performSwitch(target, preferredMode: .keyboard,
                                 globalExperiment: false) {
             case .success:
+                expectedIDs[displayID] = target.systemID
                 SpaceSwitchDiagnostics.record(
                     "mc-pair-diagnostic trial=\(trial) keyboard-confirmed"
                     + " display=\(SpaceSwitchDiagnostics.shortDisplay(displayID))")
