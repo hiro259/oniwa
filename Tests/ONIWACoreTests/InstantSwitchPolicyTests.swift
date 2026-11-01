@@ -39,4 +39,39 @@ final class InstantSwitchPolicyTests: XCTestCase {
             previous: 100, expected: 200, observed: 100, orderUnchanged: false),
             .abort)
     }
+    func testDelayedGestureMustBeUnchangedTwiceBeforeKeyboardFallback() {
+        XCTAssertEqual(InstantSwitchPolicy.settledFallbackDecision(
+            previous: 100, expected: 200,
+            firstObserved: 100, secondObserved: 100,
+            firstOrderUnchanged: true, secondOrderUnchanged: true,
+            otherDisplaysUnchanged: true), .keyboard)
+        XCTAssertEqual(InstantSwitchPolicy.settledFallbackDecision(
+            previous: 100, expected: 200,
+            firstObserved: 200, secondObserved: 200,
+            firstOrderUnchanged: true, secondOrderUnchanged: true,
+            otherDisplaysUnchanged: true), .alreadySwitched)
+    }
+
+    func testDelayedOrReversedGestureCannotTriggerKeyboard() {
+        for (first, second) in [(100 as UInt64, 200 as UInt64),
+                                 (200 as UInt64, 100 as UInt64),
+                                 (100 as UInt64, 300 as UInt64)] {
+            XCTAssertEqual(InstantSwitchPolicy.settledFallbackDecision(
+                previous: 100, expected: 200,
+                firstObserved: first, secondObserved: second,
+                firstOrderUnchanged: true, secondOrderUnchanged: true,
+                otherDisplaysUnchanged: true), .abort)
+        }
+        XCTAssertEqual(InstantSwitchPolicy.settledFallbackDecision(
+            previous: 100, expected: 200,
+            firstObserved: 100, secondObserved: 100,
+            firstOrderUnchanged: true, secondOrderUnchanged: false,
+            otherDisplaysUnchanged: true), .abort)
+        XCTAssertEqual(InstantSwitchPolicy.settledFallbackDecision(
+            previous: 100, expected: 200,
+            firstObserved: 100, secondObserved: 100,
+            firstOrderUnchanged: true, secondOrderUnchanged: true,
+            otherDisplaysUnchanged: false), .abort)
+    }
+
 }

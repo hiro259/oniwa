@@ -18,6 +18,23 @@ public enum SpaceNavigation {
         case targetSpaceMissing
     }
 
+    /// macOS can reorder Spaces automatically while navigation is in flight.
+    /// A permutation of the same unique IDs is safe to replan using the latest
+    /// order; adding/removing/duplicating IDs is NOT safe to auto-follow.
+    public enum LayoutChange: Equatable {
+        case unchanged
+        case reordered
+        case membershipChanged
+    }
+
+    public static func layoutChange(from previous: [UInt64],
+                                    to live: [UInt64]) -> LayoutChange {
+        guard !previous.isEmpty, previous.count == Set(previous).count,
+              live.count == previous.count, live.count == Set(live).count,
+              Set(previous) == Set(live) else { return .membershipChanged }
+        return previous == live ? .unchanged : .reordered
+    }
+
     public static func nextStep(orderedSpaceIDs: [UInt64], current: UInt64,
                                 target: UInt64) throws -> Decision {
         guard !orderedSpaceIDs.isEmpty else { throw PlanError.emptyLayout }
