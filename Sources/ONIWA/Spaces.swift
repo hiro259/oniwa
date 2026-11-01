@@ -549,10 +549,14 @@ final class SpaceSwitcher {
         _ missing: [String],
         baseline: [DisplayGroup],
         targets: [String: SpaceEntry],
+        alreadyConfirmed: [String: UInt64],
         trial: Int64
     ) -> Result<Void, Error> {
-        var expectedIDs = currentSpaceIDs(SpaceReader.shared.displays(includeAppNames: false))
         let originalIDs = currentSpaceIDs(baseline)
+        var expectedIDs = originalIDs
+        for (id, destination) in alreadyConfirmed {
+            expectedIDs[id] = destination
+        }
         for displayID in missing {
             let before = SpaceReader.shared.displays(includeAppNames: false)
             guard currentSpaceIDs(before) == expectedIDs,
@@ -715,8 +719,10 @@ final class SpaceSwitcher {
             case .missing(let ids):
                 SpaceSwitchDiagnostics.record(
                     "desktop-number trial=\(trial) rapid-missed=\(ids)")
+                let confirmed = impacted.filter { !ids.contains($0.key) }
                 switch repairNumberedTargets(ids, baseline: before,
-                                             targets: targets, trial: trial) {
+                                             targets: targets, alreadyConfirmed: confirmed,
+                                             trial: trial) {
                 case .success: break
                 case .failure(let error): return .failure(error)
                 }
@@ -774,7 +780,8 @@ final class SpaceSwitcher {
                             + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))")
                     case .missing(let ids):
                         switch repairNumberedTargets(ids, baseline: groupBaseline,
-                                                     targets: targets, trial: trial) {
+                                                     targets: targets, alreadyConfirmed: [:],
+                                                     trial: trial) {
                         case .success: break
                         case .failure(let error): return .failure(error)
                         }
@@ -827,7 +834,7 @@ final class SpaceSwitcher {
         case .missing(let ids):
             switch repairNumberedTargets(ids, baseline: before,
                                          targets: [target.displayID: target],
-                                         trial: trial) {
+                                         alreadyConfirmed: [:], trial: trial) {
             case .failure(let error): return .failure(error)
             case .success:
                 return verifyNumberedFinal(
