@@ -1107,7 +1107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Radio-style groups: one active choice per group, persisted separately.
         let singleRoot = NSMenuItem(
-            title: "単独Space：\(singleModeSummary(SwitchModeSettings.single))",
+            title: singleModeMenuTitle(SwitchModeSettings.single),
             action: nil, keyEquivalent: "")
         singleSwitchRootItem = singleRoot
         let singleMenu = NSMenu(title: "単独Spaceの切り替え")
@@ -1131,7 +1131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(singleRoot)
 
         let pairRoot = NSMenuItem(
-            title: "2画面セット：\(pairModeSummary(SwitchModeSettings.pair))",
+            title: pairModeMenuTitle(SwitchModeSettings.pair),
             action: nil, keyEquivalent: "")
         pairSwitchRootItem = pairRoot
         let pairMenu = NSMenu(title: "2画面セットの切り替え")
@@ -1160,11 +1160,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pacing = NSMenuItem(title: "瞬時切り替え・間隔テスト（450ms）",
                                 action: #selector(toggleInstantPacingProbe),
                                 keyEquivalent: "")
-        pacing.toolTip = "gestureの成功後、450msの安定確認を行う診断設定です。"
-            + "全画面実験モードでも使えます。"
+        pacing.toolTip = "通常の単独瞬時切り替えの診断用です。"
+            + "全画面実験モードでは安全のため常に450msの確認を行います。"
         pacing.state = InstantSwitchSettings.pacingProbeEnabled ? .on : .off
-        pacing.isEnabled = SwitchModeSettings.globalInstantExperimentEnabled
-            || SwitchModeSettings.single == .instant
+        pacing.isEnabled = !SwitchModeSettings.globalInstantExperimentEnabled
+            && SwitchModeSettings.single == .instant
         pacing.target = self
         instantPacingItem = pacing
         detailMenu.addItem(pacing)
@@ -1225,13 +1225,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func singleModeMenuTitle(_ mode: SingleSpaceSwitchMode) -> String {
+        let paused = SwitchModeSettings.globalInstantExperimentEnabled ? "（休止中）" : ""
+        return "単独Space：\(singleModeSummary(mode))\(paused)"
+    }
+
+    private func pairModeMenuTitle(_ mode: PairSpaceSwitchMode) -> String {
+        let paused = SwitchModeSettings.globalInstantExperimentEnabled ? "（休止中）" : ""
+        return "2画面セット：\(pairModeSummary(mode))\(paused)"
+    }
+
     @objc private func toggleGlobalInstantExperiment() {
         SwitchModeSettings.globalInstantExperimentEnabled.toggle()
         let enabled = SwitchModeSettings.globalInstantExperimentEnabled
         globalInstantExperimentItem?.state = enabled ? .on : .off
         singleSwitchRootItem?.isEnabled = !enabled
         pairSwitchRootItem?.isEnabled = !enabled
-        instantPacingItem?.isEnabled = enabled || SwitchModeSettings.single == .instant
+        singleSwitchRootItem?.title = singleModeMenuTitle(SwitchModeSettings.single)
+        pairSwitchRootItem?.title = pairModeMenuTitle(SwitchModeSettings.pair)
+        instantPacingItem?.isEnabled = !enabled && SwitchModeSettings.single == .instant
         SpaceSwitchDiagnostics.record("global-instant setting enabled=\(enabled)")
     }
 
@@ -1244,7 +1256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.state = mode == selected ? .on : .off
         }
         instantPacingItem?.isEnabled = selected == .instant
-        singleSwitchRootItem?.title = "単独Space：\(singleModeSummary(selected))"
+        singleSwitchRootItem?.title = singleModeMenuTitle(selected)
         SpaceSwitchDiagnostics.record("single mode setting=\(selected.rawValue)")
     }
 
@@ -1256,13 +1268,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for (mode, item) in pairSwitchItems {
             item.state = mode == selected ? .on : .off
         }
-        pairSwitchRootItem?.title = "2画面セット：\(pairModeSummary(selected))"
+        pairSwitchRootItem?.title = pairModeMenuTitle(selected)
         SpaceSwitchDiagnostics.record("pair mode setting=\(selected.rawValue)")
     }
 
     @objc private func toggleInstantPacingProbe() {
-        guard SwitchModeSettings.globalInstantExperimentEnabled
-            || SwitchModeSettings.single == .instant else { return }
+        guard !SwitchModeSettings.globalInstantExperimentEnabled
+            && SwitchModeSettings.single == .instant else { return }
         InstantSwitchSettings.pacingProbeEnabled.toggle()
         instantPacingItem?.state =
             InstantSwitchSettings.pacingProbeEnabled ? .on : .off
