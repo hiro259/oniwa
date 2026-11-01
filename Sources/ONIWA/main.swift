@@ -1043,6 +1043,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var singleSwitchRootItem: NSMenuItem?
     private var pairSwitchRootItem: NSMenuItem?
     private var globalInstantExperimentItem: NSMenuItem?
+    private var globalMCOneSessionExperimentItem: NSMenuItem?
+    private var mcReverseOrderItem: NSMenuItem?
     private var instantPacingItem: NSMenuItem?
     private var missionControlWaitRootItem: NSMenuItem?
     private var missionControlResetWaitItem: NSMenuItem?
@@ -1103,6 +1105,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         globalInstant.target = self
         globalInstantExperimentItem = globalInstant
         menu.addItem(globalInstant)
+
+        let mcOneSession = NSMenuItem(
+            title: "全画面：Mission Control 1回・2画面診断実験（優先）",
+            action: #selector(toggleGlobalMCOneSessionExperiment), keyEquivalent: "")
+        mcOneSession.toolTip = "2画面セットではMission Controlを1回だけ表示して2つのSpaceをAXPress。"
+            + "安全に未移動と確認できた画面だけキーボードで補完します。"
+            + "単独SpaceではMission Control直接方式を使用します。"
+        mcOneSession.state =
+            SwitchModeSettings.globalMCOneSessionExperimentEnabled ? .on : .off
+        mcOneSession.target = self
+        globalMCOneSessionExperimentItem = mcOneSession
+        menu.addItem(mcOneSession)
         menu.addItem(NSMenuItem.separator())
 
         // Radio-style groups: one active choice per group, persisted separately.
@@ -1127,7 +1141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             singleMenu.addItem(option)
         }
         singleRoot.submenu = singleMenu
-        singleRoot.isEnabled = !SwitchModeSettings.globalInstantExperimentEnabled
+        singleRoot.isEnabled = !SwitchModeSettings.anyGlobalExperimentEnabled
         menu.addItem(singleRoot)
 
         let pairRoot = NSMenuItem(
@@ -1151,7 +1165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pairMenu.addItem(option)
         }
         pairRoot.submenu = pairMenu
-        pairRoot.isEnabled = !SwitchModeSettings.globalInstantExperimentEnabled
+        pairRoot.isEnabled = !SwitchModeSettings.anyGlobalExperimentEnabled
         menu.addItem(pairRoot)
 
         let detailRoot = NSMenuItem(title: "詳細設定", action: nil,
@@ -1163,11 +1177,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pacing.toolTip = "通常の単独瞬時切り替えの診断用です。"
             + "全画面実験モードでは安全のため常に450msの確認を行います。"
         pacing.state = InstantSwitchSettings.pacingProbeEnabled ? .on : .off
-        pacing.isEnabled = !SwitchModeSettings.globalInstantExperimentEnabled
+        pacing.isEnabled = !SwitchModeSettings.anyGlobalExperimentEnabled
             && SwitchModeSettings.single == .instant
         pacing.target = self
         instantPacingItem = pacing
         detailMenu.addItem(pacing)
+
+        let reverseOrder = NSMenuItem(
+            title: "MC一回実験：2画面目のAXPressを先に送る（比較用）",
+            action: #selector(toggleMCReversePressOrder), keyEquivalent: "")
+        reverseOrder.toolTip = "診断実験で押す順番を入れ替えます。"
+            + "OFF=セット1→セット2、ON=セット2→セット1。"
+            + "結果を診断ログに記録します。"
+        reverseOrder.state = SwitchModeSettings.mcReversePressOrder ? .on : .off
+        reverseOrder.isEnabled = SwitchModeSettings.globalMCOneSessionExperimentEnabled
+        reverseOrder.target = self
+        mcReverseOrderItem = reverseOrder
+        detailMenu.addItem(reverseOrder)
 
         let waitRoot = NSMenuItem(title: "Mission Control待機時間：300ms（推奨）",
                                   action: nil, keyEquivalent: "")
@@ -1226,29 +1252,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func singleModeMenuTitle(_ mode: SingleSpaceSwitchMode) -> String {
-        let paused = SwitchModeSettings.globalInstantExperimentEnabled ? "（休止中）" : ""
+        let paused = SwitchModeSettings.anyGlobalExperimentEnabled ? "（休止中）" : ""
         return "単独Space：\(singleModeSummary(mode))\(paused)"
     }
 
     private func pairModeMenuTitle(_ mode: PairSpaceSwitchMode) -> String {
-        let paused = SwitchModeSettings.globalInstantExperimentEnabled ? "（休止中）" : ""
+        let paused = SwitchModeSettings.anyGlobalExperimentEnabled ? "（休止中）" : ""
         return "2画面セット：\(pairModeSummary(mode))\(paused)"
+    }
+
+    private func refreshGlobalExperimentMenuState() {
+        let instant = SwitchModeSettings.globalInstantExperimentEnabled
+        let mc = SwitchModeSettings.globalMCOneSessionExperimentEnabled
+        globalInstantExperimentItem?.state = instant ? .on : .off
+        globalMCOneSessionExperimentItem?.state = mc ? .on : .off
+        singleSwitchRootItem?.isEnabled = !instant && !mc
+        pairSwitchRootItem?.isEnabled = !instant && !mc
+        singleSwitchRootItem?.title = singleModeMenuTitle(SwitchModeSettings.single)
+        pairSwitchRootItem?.title = pairModeMenuTitle(SwitchModeSettings.pair)
+        instantPacingItem?.isEnabled =
+            !instant && !mc && SwitchModeSettings.single == .instant
+        mcReverseOrderItem?.isEnabled = mc
     }
 
     @objc private func toggleGlobalInstantExperiment() {
         SwitchModeSettings.globalInstantExperimentEnabled.toggle()
-        let enabled = SwitchModeSettings.globalInstantExperimentEnabled
-        globalInstantExperimentItem?.state = enabled ? .on : .off
-        singleSwitchRootItem?.isEnabled = !enabled
-        pairSwitchRootItem?.isEnabled = !enabled
-        singleSwitchRootItem?.title = singleModeMenuTitle(SwitchModeSettings.single)
-        pairSwitchRootItem?.title = pairModeMenuTitle(SwitchModeSettings.pair)
-        instantPacingItem?.isEnabled = !enabled && SwitchModeSettings.single == .instant
-        SpaceSwitchDiagnostics.record("global-instant setting enabled=\(enabled)")
+        refreshGlobalExperimentMenuState()
+        SpaceSwitchDiagnostics.record(
+            "global-instant setting enabled=\(SwitchModeSettings.globalInstantExperimentEnabled)"
+            + " mc-one-enabled=\(SwitchModeSettings.globalMCOneSessionExperimentEnabled)")
+    }
+
+    @objc private func toggleGlobalMCOneSessionExperiment() {
+        SwitchModeSettings.globalMCOneSessionExperimentEnabled.toggle()
+        refreshGlobalExperimentMenuState()
+        SpaceSwitchDiagnostics.record(
+            "mc-pair-diagnostic setting enabled=\(SwitchModeSettings.globalMCOneSessionExperimentEnabled)"
+            + " instant-enabled=\(SwitchModeSettings.globalInstantExperimentEnabled)"
+            + " reverse=\(SwitchModeSettings.mcReversePressOrder)")
+    }
+
+    @objc private func toggleMCReversePressOrder() {
+        guard SwitchModeSettings.globalMCOneSessionExperimentEnabled else { return }
+        SwitchModeSettings.mcReversePressOrder.toggle()
+        mcReverseOrderItem?.state = SwitchModeSettings.mcReversePressOrder ? .on : .off
+        SpaceSwitchDiagnostics.record(
+            "mc-pair-diagnostic reverse-order=\(SwitchModeSettings.mcReversePressOrder)")
     }
 
     @objc private func selectSingleSwitchMode(_ sender: NSMenuItem) {
-        guard !SwitchModeSettings.globalInstantExperimentEnabled else { return }
+        guard !SwitchModeSettings.anyGlobalExperimentEnabled else { return }
         guard let raw = sender.representedObject as? String,
               let selected = SingleSpaceSwitchMode(rawValue: raw) else { return }
         SwitchModeSettings.single = selected
@@ -1261,7 +1314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func selectPairSwitchMode(_ sender: NSMenuItem) {
-        guard !SwitchModeSettings.globalInstantExperimentEnabled else { return }
+        guard !SwitchModeSettings.anyGlobalExperimentEnabled else { return }
         guard let raw = sender.representedObject as? String,
               let selected = PairSpaceSwitchMode(rawValue: raw) else { return }
         SwitchModeSettings.pair = selected
@@ -1273,7 +1326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleInstantPacingProbe() {
-        guard !SwitchModeSettings.globalInstantExperimentEnabled
+        guard !SwitchModeSettings.anyGlobalExperimentEnabled
             && SwitchModeSettings.single == .instant else { return }
         InstantSwitchSettings.pacingProbeEnabled.toggle()
         instantPacingItem?.state =
