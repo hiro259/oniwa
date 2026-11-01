@@ -174,14 +174,18 @@ final class SpaceSwitcher {
         }
 
         let pairMode = SwitchModeSettings.pair
-        SpaceSwitchDiagnostics.record("pair selected-mode=\(pairMode.rawValue)")
-        if pairMode == .hybrid {
+        let globalExperiment = SwitchModeSettings.globalInstantExperimentEnabled
+        SpaceSwitchDiagnostics.record(
+            "pair selected-mode=\(pairMode.rawValue) global-instant=\(globalExperiment)")
+        if GlobalInstantExperimentPolicy.usesHybrid(
+            enabled: globalExperiment, selected: pairMode) {
             return performPairHybrid(pair, before: before)
         }
-        // Keyboard mode never inherits the legacy fast Dock gesture flag.
-        // MC-twice mode uses direct thumbnail selection for both displays.
-        let individualMode: SingleSpaceSwitchMode =
-            pairMode == .missionControlTwice ? .missionControl : .keyboard
+        // Global experiment overrides both displays and every saved pair
+        // strategy, but never overwrites those preferences.
+        var pairHadGestureFallback = false
+        let firstMode = GlobalInstantExperimentPolicy.pairStepMode(
+            enabled: globalExperiment, selected: pairMode, hadGestureFallback: false)
 
         // Snapshot unrelated displays so we can detect an unintended change.
         var untouched: [String: UInt64] = [:]
@@ -190,7 +194,9 @@ final class SpaceSwitcher {
             if let current = display.currentID { untouched[display.id] = current }
         }
 
-        switch performSwitch(first, preferredMode: individualMode) {
+        switch performSwitch(
+            first, preferredMode: firstMode, globalExperiment: globalExperiment,
+            onInstantFallback: { pairHadGestureFallback = true }) {
         case .failure(let error):
             SpaceSwitchDiagnostics.record("pair first failed \(error.localizedDescription)")
             return .failure(SwitchFailure(
@@ -223,7 +229,15 @@ final class SpaceSwitcher {
                 + " space=\(second.systemID)"
                 + " uuid=\(String(second.identity.uuid?.prefix(8) ?? "unknown"))")
         }
-        switch performSwitch(second, preferredMode: individualMode) {
+        let secondMode = GlobalInstantExperimentPolicy.pairStepMode(
+            enabled: globalExperiment, selected: pairMode,
+            hadGestureFallback: pairHadGestureFallback)
+        SpaceSwitchDiagnostics.record(
+            "pair second-mode=\(secondMode.rawValue)"
+            + " prior-fallback=\(pairHadGestureFallback)")
+        switch performSwitch(
+            second, preferredMode: secondMode, globalExperiment: globalExperiment,
+            onInstantFallback: { pairHadGestureFallback = true }) {
         case .failure(let error):
             SpaceSwitchDiagnostics.record("pair second failed \(error.localizedDescription)")
             return .failure(SwitchFailure(
@@ -565,10 +579,28 @@ final class SpaceSwitcher {
         }.joined(separator: " ")
     }
 
-    private func performSwitch(_ target: SpaceEntry,
-                               preferredMode: SingleSpaceSwitchMode? = nil) -> Result<Void, Error> {
-        let mode = preferredMode ?? SwitchModeSettings.single
-        SpaceSwitchDiagnostics.record("single selected-mode=\(mode.rawValue)"
+    private func performSwitch(
+        _ target: SpaceEntry,
+        preferredMode: SingleSpaceSwitchMode? = nil,
+        globalExperiment: Bool? = nil,
+        onInstantFallback: (() -> Void)? = nil
+    ) -> Result<Void, Error> {
+        let experiment = globalExperiment
+            ?? SwitchModeSettings.globalInstantExperimentEnabled
+        let mode = preferredMode ?? GlobalInstantExperimentPolicy.singleMode(
+            enabled: experiment, selected: SwitchModeSettings.single)
+        var activeMode = mode
+        func markInstantFallback(_ reason: String) {
+            guard activeMode == .instant else { return }
+            activeMode = .keyboard
+            onInstantFallback?()
+            SpaceSwitchDiagnostics.record(
+                "instant-fallback keyboard reason=\(reason)"
+                + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
+                + " global=\(experiment)")
+        }
+        SpaceSwitchDiagnostics.record(
+            "single selected-mode=\(mode.rawValue) global-instant=\(experiment)"
             + " target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))")
         let reader = SpaceReader.shared
         let initialDisplays = reader.displays(includeAppNames: false)
@@ -755,13 +787,13 @@ final class SpaceSwitcher {
             case .arrived:
                 return verifySettledTarget(
                     target, reader: reader,
-                    useInstant: mode == .instant)
+                    useInstant: activeMode == .instant)
             case let .move(direction, nextSpaceID):
                 SpaceSwitchDiagnostics.record(
                     "step target=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID)) "
                     + "from=\(current) to=\(nextSpaceID) "
                     + "direction=\(direction == .right ? "right" : "left") "
-                    + "mode=\(mode == .instant ? "instant-first" : "keyboard")")
+                    + "mode=\(activeMode == .instant ? "instant-first" : "keyboard")")
                 guard let cursor = CGEvent(source: nil)?.location,
                       displayBounds.contains(cursor) else {
                     return .failure(SwitchFailure(
@@ -781,8 +813,10 @@ final class SpaceSwitcher {
                 // as proof of a switch. If no movement is observed, verify the
                 // live ID again before trying the existing Ctrl+arrow fallback.
                 // Unexpected movement is a hard stop, never another keypress.
-                if mode == .instant,
-                   InstantSpaceGesture.post(right: direction == .right) {
+                let instantPosted = activeMode == .instant
+                    ? InstantSpaceGesture.post(right: direction == .right)
+                    : false
+                if activeMode == .instant && instantPosted {
                     switch waitForNeighbor(
                         previous: current, expected: nextSpaceID,
                         displayID: target.displayID, reader: reader,
@@ -793,7 +827,7 @@ final class SpaceSwitcher {
                         // 150-350ms delayed Space snap-back before posting
                         // another gesture. This is NOT a permanent fast-mode
                         // speed change; the menu toggle defaults to OFF.
-                        if InstantSwitchSettings.pacingProbeEnabled {
+                        if experiment || InstantSwitchSettings.pacingProbeEnabled {
                             let startedAt = ProcessInfo.processInfo.systemUptime
                             Thread.sleep(forTimeInterval: 0.45)
                             let after = reader.displays(includeAppNames: false)
@@ -813,7 +847,7 @@ final class SpaceSwitcher {
                             guard outcome == .confirmed else {
                                 return .failure(SwitchFailure(
                                     "瞬時切り替え後450ms以内にSpaceが再移動しました。"
-                                    + "診断のため次のジェスチャーを送らず停止しました。"))
+                                    + "別のキーを送らず安全停止しました。"))
                             }
                         }
                         // The next loop verifies the next neighboring Space.
@@ -828,41 +862,81 @@ final class SpaceSwitcher {
                         return .failure(SwitchFailure(
                             "瞬時切り替え中にモニターを認識できなくなりました。"))
                     case .timedOut:
-                        // A delayed/unsupported synthetic gesture might still
-                        // be in flight. Give the system an extra observation,
-                        // and never emit Ctrl+arrow after movement was seen.
-                        guard let latest = reader.displays(includeAppNames: false)
-                            .first(where: { $0.id == target.displayID }) else {
-                            return .failure(SwitchFailure(
-                                "対象モニターが接続解除されました。"))
+                        // The Dock can report its state late. Observe twice,
+                        // separated by 650ms, before posting ANY keyboard
+                        // fallback. A confirmed late arrival, a snap-back,
+                        // a changed display, or an altered roster must NEVER
+                        // result in a second movement.
+                        let sample1 = reader.displays(includeAppNames: false)
+                        Thread.sleep(forTimeInterval: 0.65)
+                        let sample2 = reader.displays(includeAppNames: false)
+                        let firstLive = sample1.first(where: {
+                            $0.id == target.displayID
+                        })
+                        let secondLive = sample2.first(where: {
+                            $0.id == target.displayID
+                        })
+                        let firstOutcome = SpaceSwitchObservation.evaluate(
+                            targetDisplay: target.displayID,
+                            beforeTarget: current, expectedTarget: nextSpaceID,
+                            beforeOthers: beforeOthers,
+                            after: currentSpaceIDs(sample1))
+                        let secondOutcome = SpaceSwitchObservation.evaluate(
+                            targetDisplay: target.displayID,
+                            beforeTarget: current, expectedTarget: nextSpaceID,
+                            beforeOthers: beforeOthers,
+                            after: currentSpaceIDs(sample2))
+                        let rosterStable = [firstLive, secondLive].allSatisfy {
+                            guard let live = $0,
+                                  live.spaces.count == initialSpaces.count else {
+                                return false
+                            }
+                            return live.spaces.allSatisfy { space in
+                                initialSpaces.contains(where: {
+                                    $0.identity == space.identity
+                                })
+                            }
                         }
-                        // Do not fall back if the first attempt moved another
-                        // display. That would otherwise produce two wrong steps.
-                        let outcome = SpaceSwitchObservation.evaluate(
-                            targetDisplay: target.displayID, beforeTarget: current,
-                            expectedTarget: nextSpaceID, beforeOthers: beforeOthers,
-                            after: currentSpaceIDs(reader.displays(includeAppNames: false))
-                        )
-                        guard outcome == .waiting || outcome == .confirmed else {
-                            SpaceSwitchDiagnostics.record("fallback blocked: \(outcome)")
-                            return .failure(SwitchFailure(
-                                "瞬時切り替えが別モニターに作用したか、状態を確認できません。追加操作を停止しました。"))
+                        let othersStable = [sample1, sample2].allSatisfy { snapshot in
+                            beforeOthers.allSatisfy { id, oldID in
+                                snapshot.first(where: { $0.id == id })?.currentID
+                                    == oldID
+                            }
                         }
-                        switch InstantSwitchPolicy.fallbackDecision(
+                        let decision = InstantSwitchPolicy.settledFallbackDecision(
                             previous: current, expected: nextSpaceID,
-                            observed: latest.currentID,
-                            orderUnchanged: latest.spaces.map(\.systemID) == order
-                        ) {
+                            firstObserved: firstLive?.currentID,
+                            secondObserved: secondLive?.currentID,
+                            firstOrderUnchanged: firstLive?.spaces.map(\.systemID) == order,
+                            secondOrderUnchanged: secondLive?.spaces.map(\.systemID) == order,
+                            otherDisplaysUnchanged: othersStable && rosterStable
+                                && (firstOutcome == .waiting || firstOutcome == .confirmed)
+                                && (secondOutcome == .waiting || secondOutcome == .confirmed)
+                        )
+                        SpaceSwitchDiagnostics.record(
+                            "instant-timeout settle first=\(firstLive?.currentID.map(String.init) ?? "missing")"
+                            + " second=\(secondLive?.currentID.map(String.init) ?? "missing")"
+                            + " first-outcome=\(firstOutcome) second-outcome=\(secondOutcome)"
+                            + " decision=\(decision)")
+                        switch decision {
                         case .alreadySwitched:
+                            // Still only one gesture was sent.
                             continue
                         case .keyboard:
-                            break // The previous Space is still current.
+                            break
                         case .abort:
                             return .failure(SwitchFailure(
-                                "Spaceの移動状態または順序が変わったため、追加操作を中断しました。"))
+                                "瞬時切り替え後の状態が不明、またはSpace/モニターが変化しました。"
+                                + "二重移動を避けるためキーボードは送信せず中断しました。"))
                         }
-                        // No movement after the fast gesture: normal fallback.
-                    }
+
+                // Keyboard after a gesture failure is limited to this
+                // activation. For a pair, the callback keeps its remaining
+                // display on the keyboard path too. A new activation retries.
+                if activeMode == .instant {
+                    markInstantFallback(instantPosted
+                        ? "stable-unmoved-after-gesture-timeout"
+                        : "gesture-unavailable-or-not-posted")
                 }
 
                 // An instant attempt may wait almost a second. If the user
