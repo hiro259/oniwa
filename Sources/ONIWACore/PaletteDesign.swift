@@ -31,14 +31,14 @@ public enum PaletteDesign: String, CaseIterable, Identifiable {
 
     public var detail: String {
         switch self {
-        case .nativeCalm: return "macOSに馴染む、静かな標準スタイル"
-        case .frostedFocus: return "透け感のある、軽やかな検索パレット"
-        case .commandCompact: return "情報密度とキーボード操作を最優先"
-        case .studioCards: return "作業環境をゆったりと見渡すカード"
-        case .monitorFocus: return "モニターと2画面セットを明確に表示"
-        case .modernPrecision: return "上質なグレーと繊細なガラス質感"
-        case .pureMonochrome: return "余白と文字だけで整えたミニマルなUI"
-        case .macOSNative: return "すりガラスと余白を活かしたmacOS純正風パレット"
+        case .nativeCalm: return AppLanguage.ui("macOSに馴染む、静かな標準スタイル", "Quiet, familiar macOS style")
+        case .frostedFocus: return AppLanguage.ui("透け感のある、軽やかな検索パレット", "Soft, translucent search palette")
+        case .commandCompact: return AppLanguage.ui("情報密度とキーボード操作を最優先", "Compact, keyboard-first interface")
+        case .studioCards: return AppLanguage.ui("作業環境をゆったりと見渡すカード", "Spacious workspace cards")
+        case .monitorFocus: return AppLanguage.ui("モニターと2画面セットを明確に表示", "Emphasis on displays and paired Spaces")
+        case .modernPrecision: return AppLanguage.ui("上質なグレーと繊細なガラス質感", "Subtle gray tones and glass effects")
+        case .pureMonochrome: return AppLanguage.ui("余白と文字だけで整えたミニマルなUI", "Minimal layout, focused on typography")
+        case .macOSNative: return AppLanguage.ui("すりガラスと余白を活かしたmacOS純正風パレット", "Native-inspired glass and whitespace")
         }
     }
 
