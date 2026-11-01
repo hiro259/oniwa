@@ -1196,7 +1196,10 @@ struct SearchView: View {
                     }
                 }
                 if !state.pairCanSave {
-                    Text(t("別々のモニターからSpaceを選んでください。", "Choose a Space from each display."))
+                    Text(SpacePair.cleanedName(state.pairNameDraft).isEmpty
+                         ? t("セット名を入力してください。", "Enter a set name.")
+                         : t("別々のモニターからSpaceを選んでください。",
+                             "Choose a Space from each display."))
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
