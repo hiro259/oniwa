@@ -13,9 +13,40 @@ enum SwitchModeSettings {
     /// The flag is never disabled by an individual failed gesture.
     static let globalInstantExperimentKey = "oniwa.globalInstantExperimentEnabled"
 
+    /// Distinct from the retired legacy MC-one-session preference; this
+    /// experiment records AX timings and verifies safe partial fallback.
+    static let globalMCOneSessionExperimentKey = "oniwa.mcOneSessionDiagnosticExperimentEnabled"
+    static let mcReversePressOrderKey = "oniwa.mcOneSessionReversePressOrder"
+
     static var globalInstantExperimentEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: globalInstantExperimentKey) }
-        set { UserDefaults.standard.set(newValue, forKey: globalInstantExperimentKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: globalInstantExperimentKey)
+            if newValue {
+                UserDefaults.standard.set(false, forKey: globalMCOneSessionExperimentKey)
+            }
+        }
+    }
+
+    static var globalMCOneSessionExperimentEnabled: Bool {
+        get { UserDefaults.standard.bool(forKey: globalMCOneSessionExperimentKey) }
+        set {
+            UserDefaults.standard.set(newValue, forKey: globalMCOneSessionExperimentKey)
+            if newValue {
+                UserDefaults.standard.set(false, forKey: globalInstantExperimentKey)
+            }
+        }
+    }
+
+    /// False: first saved Space before second; true: second before first.
+    /// A/B testing is manual so individual trials are not silently alternated.
+    static var mcReversePressOrder: Bool {
+        get { UserDefaults.standard.bool(forKey: mcReversePressOrderKey) }
+        set { UserDefaults.standard.set(newValue, forKey: mcReversePressOrderKey) }
+    }
+
+    static var anyGlobalExperimentEnabled: Bool {
+        globalInstantExperimentEnabled || globalMCOneSessionExperimentEnabled
     }
 
     static var single: SingleSpaceSwitchMode {
