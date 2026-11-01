@@ -1044,6 +1044,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pairSwitchRootItem: NSMenuItem?
     private var globalInstantExperimentItem: NSMenuItem?
     private var globalMCOneSessionExperimentItem: NSMenuItem?
+    private var desktopNumberExperimentItems: [DesktopNumberExperimentMode: NSMenuItem] = [:]
     private var mcReverseOrderItem: NSMenuItem?
     private var instantPacingItem: NSMenuItem?
     private var missionControlWaitRootItem: NSMenuItem?
@@ -1117,6 +1118,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mcOneSession.target = self
         globalMCOneSessionExperimentItem = mcOneSession
         menu.addItem(mcOneSession)
+
+        for (mode, title) in [
+            (DesktopNumberExperimentMode.rapid,
+             "全画面：番号指定ショートカット・2画面高速連続（実験）"),
+            (.sequential,
+             "全画面：番号指定ショートカット・2画面逐次確認（実験）")
+        ] {
+            let entry = NSMenuItem(
+                title: title,
+                action: #selector(selectDesktopNumberExperiment(_:)),
+                keyEquivalent: "")
+            entry.representedObject = mode.rawValue
+            entry.state = SwitchModeSettings.desktopNumberExperimentMode == mode
+                ? .on : .off
+            entry.toolTip = "macOSの『デスクトップNへ移動』ショートカットを使用。"
+                + "システム設定→キーボード→キーボードショートカット→Mission Controlで"
+                + "Control+1〜9を有効化してください。フルスクリーンや未設定は"
+                + "安全確認付きのキーボード矢印移動に切り替えます。"
+                + (mode == .rapid
+                    ? "2画面へ到達確認を待たず連続送信します（厳密な同時送信ではありません）。"
+                    : "1画面目の移動と安定性を確認してから2画面目へ送信します。")
+            entry.target = self
+            desktopNumberExperimentItems[mode] = entry
+            menu.addItem(entry)
+        }
         menu.addItem(NSMenuItem.separator())
 
         // Radio-style groups: one active choice per group, persisted separately.
@@ -1264,14 +1290,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshGlobalExperimentMenuState() {
         let instant = SwitchModeSettings.globalInstantExperimentEnabled
         let mc = SwitchModeSettings.globalMCOneSessionExperimentEnabled
+        let numbered = SwitchModeSettings.desktopNumberExperimentMode
+        for (mode, item) in desktopNumberExperimentItems {
+            item.state = numbered == mode ? .on : .off
+        }
         globalInstantExperimentItem?.state = instant ? .on : .off
         globalMCOneSessionExperimentItem?.state = mc ? .on : .off
-        singleSwitchRootItem?.isEnabled = !instant && !mc
-        pairSwitchRootItem?.isEnabled = !instant && !mc
+        singleSwitchRootItem?.isEnabled = !SwitchModeSettings.anyGlobalExperimentEnabled
+        pairSwitchRootItem?.isEnabled = !SwitchModeSettings.anyGlobalExperimentEnabled
         singleSwitchRootItem?.title = singleModeMenuTitle(SwitchModeSettings.single)
         pairSwitchRootItem?.title = pairModeMenuTitle(SwitchModeSettings.pair)
         instantPacingItem?.isEnabled =
-            !instant && !mc && SwitchModeSettings.single == .instant
+            !SwitchModeSettings.anyGlobalExperimentEnabled
+                && SwitchModeSettings.single == .instant
         mcReverseOrderItem?.isEnabled = mc
     }
 
@@ -1290,6 +1321,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "mc-pair-diagnostic setting enabled=\(SwitchModeSettings.globalMCOneSessionExperimentEnabled)"
             + " instant-enabled=\(SwitchModeSettings.globalInstantExperimentEnabled)"
             + " reverse=\(SwitchModeSettings.mcReversePressOrder)")
+    }
+
+    @objc private func selectDesktopNumberExperiment(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let selected = DesktopNumberExperimentMode(rawValue: raw),
+              selected != .off else { return }
+        SwitchModeSettings.desktopNumberExperimentMode =
+            SwitchModeSettings.desktopNumberExperimentMode == selected ? .off : selected
+        refreshGlobalExperimentMenuState()
+        SpaceSwitchDiagnostics.record(
+            "desktop-number setting mode=\(SwitchModeSettings.desktopNumberExperimentMode.rawValue)"
+            + " mc-one=\(SwitchModeSettings.globalMCOneSessionExperimentEnabled)"
+            + " instant=\(SwitchModeSettings.globalInstantExperimentEnabled)")
     }
 
     @objc private func toggleMCReversePressOrder() {
