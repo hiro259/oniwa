@@ -19,7 +19,7 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 
 ## Search palette design presets (Issue #12 — preview)
 
-ONIWA's `庭 → 検索パレットのデザイン` menu offers **seven** locally persisted visual presets. These options only affect presentation and do not alter the 50ms Space switching route, query matching, current selection, pinned order or saved Space/pair identities.
+ONIWA's `庭 → 検索パレットのデザイン` menu offers **eight** locally persisted visual presets. These options only affect presentation and do not alter the 50ms Space switching route, query matching, current selection, pinned order or saved Space/pair identities.
 
 | # | Preset | Design focus |
 |---|---|---|
@@ -30,10 +30,11 @@ ONIWA's `庭 → 検索パレットのデザイン` menu offers **seven** locall
 | 5 | Monitor Focus | Clearer per-display and pair cues |
 | **6** | **Modern Precision** | Raycast/Linear-inspired refinement: custom slim search outline, quiet focus glow, subtly graded and translucent row surfaces, smooth hover/selection, restrained indigo accents |
 | **7** | **Pure Monochrome** | Apple-native minimalism: more whitespace, visual hierarchy through text, no routine row borders or tag pill backgrounds, thin selection marker and selective accent |
+| **8** | **macOS Native** | macOS-inspired ultra-thin glass palette; borderless rows and chips, Spotlight-like search, fading hover-only pin/edit buttons, compact sorting Menu |
 
-The selection persists in `oniwa.paletteDesign` (UserDefaults); unknown values fall back to Native Calm. For presets 6 and 7, the search field uses a plain input instead of the standard AppKit-blue rounded focus ring. Native semantic colors support light/dark appearances, while old macOS 13 remains supported—no latest-OS-exclusive Liquid Glass APIs are required.
+The selection persists in `oniwa.paletteDesign` (UserDefaults); unknown values fall back to Native Calm. For presets 6, 7 and 8, the search field uses a plain input instead of the standard AppKit-blue rounded focus ring. Native semantic colors support light/dark appearances, while old macOS 13 remains supported—no latest-OS-exclusive Liquid Glass APIs are required.
 
-The seven designs can be compared on a Mac without rebuilding for each selection. The UI work is in [Draft PR #16](https://github.com/hiro259/oniwa/pull/16), with detailed criteria and user feedback in [Issue #12](https://github.com/hiro259/oniwa/issues/12). **This is a visual prototype** until real-device appearance, accessibility and keyboard/IME behavior have been checked.
+The eight designs can be compared on a Mac without rebuilding for each selection. The UI work is in [Draft PR #16](https://github.com/hiro259/oniwa/pull/16), with detailed criteria and user feedback in [Issue #12](https://github.com/hiro259/oniwa/issues/12). The eighth design also uses a transparent NSPanel backing to reveal genuine ultra-thin material, and exposes row actions through a context menu when they are visually hidden. **This is a visual prototype** until real-device appearance, accessibility and keyboard/IME behavior have been checked.
 
 ## First prototype
 
