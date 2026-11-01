@@ -215,7 +215,8 @@ enum MissionControlDirectSwitch {
     /// the caller reports partial state and verifies both destinations later.
     static func pressPairInOneSession(first: SpaceEntry, second: SpaceEntry,
                                       reader: SpaceReader,
-                                      original: [DisplayGroup]) -> Result<Void, Error> {
+                                      original: [DisplayGroup],
+                                      reverseOrder: Bool = false) -> Result<Void, Error> {
         guard AXIsProcessTrusted() else {
             return .failure(DirectFailure("アクセシビリティの許可を確認してください。"))
         }
@@ -315,34 +316,51 @@ enum MissionControlDirectSwitch {
                 continue
             }
 
-            SpaceSwitchDiagnostics.record(
-                "mc-pair-once ax-stable t=\(Int((now - firstReady) * 1000))ms"
-                + " configuredMs=\(MissionControlDirectSettings.readinessWaitMilliseconds)")
-            // Both AXUIElements are bound to a known display and index BEFORE
-            // the first action. Do not re-search by index after the first press
-            // or automatically open a second Mission Control session.
+            // AXPress can dismiss the MC overlay immediately. Avoid even
+            // synchronous file logging BETWEEN the presses: the log itself
+            // would perturb the timing we are trying to measure.
+            // Capture monotonic call timestamps in memory; flush afterward.
+            var ordered: [(role: String, display: String, button: AXUIElement)] = []
             if let firstButton {
-                let action = AXUIElementPerformAction(
-                    firstButton, kAXPressAction as CFString)
-                SpaceSwitchDiagnostics.record(
-                    "mc-pair-once press-first error=\(action.rawValue)")
-                guard action == .success else {
-                    return .failure(DirectFailure(
-                        "1画面目の操作に失敗しました（AX \(action.rawValue)）。"
-                        + "自動再試行はしません。"))
-                }
+                ordered.append(("first", SpaceSwitchDiagnostics.shortDisplay(first.displayID),
+                                firstButton))
             }
             if let secondButton {
-                let action = AXUIElementPerformAction(
-                    secondButton, kAXPressAction as CFString)
+                ordered.append(("second", SpaceSwitchDiagnostics.shortDisplay(second.displayID),
+                                secondButton))
+            }
+            if reverseOrder { ordered.reverse() }
+            let sequence = ordered.map { $0.role }.joined(separator: "->")
+            var attempts: [(role: String, display: String, result: Int32,
+                            began: Int64, ended: Int64)] = []
+            for step in ordered {
+                let began = Int64(ProcessInfo.processInfo.systemUptime * 1000)
+                let result = AXUIElementPerformAction(
+                    step.button, kAXPressAction as CFString)
+                let ended = Int64(ProcessInfo.processInfo.systemUptime * 1000)
+                attempts.append((step.role, step.display, result.rawValue, began, ended))
+                // An error from the first action means never attempt the next.
+                if result != .success { break }
+            }
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-once ax-stable configuredMs=\(MissionControlDirectSettings.readinessWaitMilliseconds)"
+                + " sequence=\(sequence) calls=\(attempts.count)"
+                + " reverse=\(reverseOrder)")
+            for (index, attempt) in attempts.enumerated() {
+                let gap = index == 0 ? 0 : attempt.began - attempts[index - 1].ended
                 SpaceSwitchDiagnostics.record(
-                    "mc-pair-once press-second error=\(action.rawValue)")
-                guard action == .success else {
-                    return .failure(DirectFailure(
-                        "2画面目の操作に失敗しました（AX \(action.rawValue)）。"
-                        + "1画面目だけ移動している可能性があります。"
-                        + "追加操作は行いません。"))
-                }
+                    "mc-pair-once axpress order=\(index + 1) role=\(attempt.role)"
+                    + " display=\(attempt.display) error=\(attempt.result)"
+                    + " beganUptimeMs=\(attempt.began) endedUptimeMs=\(attempt.ended)"
+                    + " durationMs=\(attempt.ended - attempt.began)"
+                    + " gapAfterPriorMs=\(gap)")
+            }
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-once after-press visibleThumbnails=\(hasVisibleThumbnailLists())")
+            if let failed = attempts.first(where: { $0.result != 0 }) {
+                return .failure(DirectFailure(
+                    "Mission Controlの\(failed.role)画面AXPressが失敗しました"
+                    + "（AX \(failed.result)）。移動した画面は後続の確認で判定します。"))
             }
             return .success(())
         }
