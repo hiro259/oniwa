@@ -2,12 +2,14 @@ import XCTest
 @testable import ONIWACore
 
 final class PaletteDesignTests: XCTestCase {
-    func testFiveDistinctStablePresets() {
-        XCTAssertEqual(PaletteDesign.allCases.count, 5)
+    func testSevenDistinctStablePresets() {
+        XCTAssertEqual(PaletteDesign.allCases.count, 7)
         XCTAssertEqual(Set(PaletteDesign.allCases.map(\.rawValue)).count, 5)
         XCTAssertTrue(PaletteDesign.allCases.allSatisfy {
             !$0.title.isEmpty && !$0.detail.isEmpty
         })
+        XCTAssertEqual(PaletteDesign.allCases[5], .modernPrecision)
+        XCTAssertEqual(PaletteDesign.allCases[6], .pureMonochrome)
     }
 
     func testUnknownOrMissingValueUsesNativeDefault() {
