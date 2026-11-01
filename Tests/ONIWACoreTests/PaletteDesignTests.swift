@@ -4,7 +4,7 @@ import XCTest
 final class PaletteDesignTests: XCTestCase {
     func testSevenDistinctStablePresets() {
         XCTAssertEqual(PaletteDesign.allCases.count, 7)
-        XCTAssertEqual(Set(PaletteDesign.allCases.map(\.rawValue)).count, 5)
+        XCTAssertEqual(Set(PaletteDesign.allCases.map(\.rawValue)).count, 7)
         XCTAssertTrue(PaletteDesign.allCases.allSatisfy {
             !$0.title.isEmpty && !$0.detail.isEmpty
         })
