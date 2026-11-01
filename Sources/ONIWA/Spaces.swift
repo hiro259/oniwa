@@ -174,6 +174,13 @@ final class SpaceSwitcher {
         }
 
         let pairMode = SwitchModeSettings.pair
+        let mcOneSessionExperiment =
+            SwitchModeSettings.globalMCOneSessionExperimentEnabled
+        if mcOneSessionExperiment {
+            SpaceSwitchDiagnostics.record(
+                "pair diagnostic-mc-one selected saved-pair=\(pairMode.rawValue)")
+            return performPairSingleSession(pair, before: before)
+        }
         let globalExperiment = SwitchModeSettings.globalInstantExperimentEnabled
         SpaceSwitchDiagnostics.record(
             "pair selected-mode=\(pairMode.rawValue) global-instant=\(globalExperiment)")
@@ -459,9 +466,9 @@ final class SpaceSwitcher {
         return .success(())
     }
 
-    /// In the experimental mode both AX targets are prepared from one
-    /// Mission Control session. There is deliberately no retry or fallback:
-    /// once an AXPress is sent, a second session could produce a wrong move.
+    /// Diagnostic experiment: select both MC thumbnails from ONE session.
+    /// Only a proven, unchanged Space can be repaired with keyboard input.
+    /// On ambiguity or an overlay still present, do not send ANY keys.
     private func performPairSingleSession(
         _ pair: SpacePair, before: [DisplayGroup]
     ) -> Result<Void, Error> {
@@ -472,99 +479,195 @@ final class SpaceSwitcher {
               let secondDisplay = before.first(where: { $0.id == pair.second.displayID }),
               let first = firstDisplay.spaces.first(where: { $0.identity == resolved.0 }),
               let second = secondDisplay.spaces.first(where: { $0.identity == resolved.1 }),
+              first.displayID != second.displayID,
               before.allSatisfy({ $0.currentID != nil }) else {
             return .failure(SwitchFailure(
-                "試験モードで両画面のSpaceを一意に識別できません。"))
+                "MC一回実験：2画面のSpaceを一意に確認できません。"))
         }
 
-        // Unrelated monitors must stay on their original Space.
-        let untouched = currentSpaceIDs(before.filter {
-            $0.id != first.displayID && $0.id != second.displayID
-        })
+        SpaceSwitchDiagnostics.beginWorkspaceTrace()
+        defer { SpaceSwitchDiagnostics.endWorkspaceTrace() }
+        let trial = Int64(ProcessInfo.processInfo.systemUptime * 1000)
+        let initialIDs = currentSpaceIDs(before)
+        let targets: [String: UInt64] = [
+            first.displayID: first.systemID,
+            second.displayID: second.systemID
+        ]
+        let reverse = SwitchModeSettings.mcReversePressOrder
+        let needsFirst = firstDisplay.currentID != first.systemID
+        let needsSecond = secondDisplay.currentID != second.systemID
+        let pattern = needsFirst && needsSecond ? "both-needed"
+            : (needsFirst ? "first-only" : (needsSecond ? "second-only" : "both-current"))
         SpaceSwitchDiagnostics.record(
-            "mc-pair-once initial \(traceLayout(before))")
-        let bothAlreadyCurrent = firstDisplay.currentID == first.systemID
-            && secondDisplay.currentID == second.systemID
-        if !bothAlreadyCurrent {
-            switch MissionControlDirectSwitch.pressPairInOneSession(
-                first: first, second: second, reader: reader, original: before) {
-            case .failure(let error):
-                SpaceSwitchDiagnostics.record(
-                    "mc-pair-once press-failed: \(error.localizedDescription)")
-                return .failure(SwitchFailure(
-                    "Mission Control一回方式が失敗しました。"
-                    + "一方の画面だけ動いた可能性があります。"
-                    + "自動再試行は行いません。\(error.localizedDescription)"))
-            case .success:
+            "mc-pair-diagnostic trial=\(trial) begin pattern=\(pattern)"
+            + " reverse=\(reverse) first=\(SpaceSwitchDiagnostics.shortDisplay(first.displayID))"
+            + " second=\(SpaceSwitchDiagnostics.shortDisplay(second.displayID))"
+            + " initial=\(traceLayout(before))")
+        if !needsFirst && !needsSecond {
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-diagnostic trial=\(trial) result=already-current")
+            return .success(())
+        }
+
+        // A failed AXPress is not proof that neither display moved.
+        // Inspect both after closing, even if the AX API returned an error.
+        let pressed = MissionControlDirectSwitch.pressPairInOneSession(
+            first: first, second: second, reader: reader, original: before,
+            reverseOrder: reverse)
+        switch pressed {
+        case .success:
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-diagnostic trial=\(trial) ax-result=sent")
+        case .failure(let error):
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-diagnostic trial=\(trial) ax-result=error"
+                + " detail=\(SpaceSwitchDiagnostics.safe(error.localizedDescription))")
+        }
+
+        // Do not send Ctrl+arrows while the MC overlay is still active. On
+        // macOS 27, a successful AXPress may precede overlay teardown.
+        let deadline = ProcessInfo.processInfo.systemUptime + 3.0
+        var closed = false
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if !MissionControlDirectSwitch.hasVisibleThumbnailLists() {
+                closed = true
                 break
             }
+            Thread.sleep(forTimeInterval: pollInterval)
         }
-        // A successful AXPress only means that macOS accepted an action.
-        // Each target must be reached and remain stable, even if the other
-        // monitor temporarily shows a Mission Control overlay Space.
-        if !bothAlreadyCurrent {
-            let deadline = ProcessInfo.processInfo.systemUptime + 3.0
-            var arrived = false
-            while ProcessInfo.processInfo.systemUptime < deadline {
-                Thread.sleep(forTimeInterval: pollInterval)
-                let current = reader.displays(includeAppNames: false)
-                guard SpacePairResolver.resolve(
-                    pair, in: current.flatMap(\.spaces).map(\.identity)) != nil else {
-                    SpaceSwitchDiagnostics.record(
-                        "mc-pair-once abort: target identity disappeared")
-                    return .failure(SwitchFailure(
-                        "切り替え中にセットのSpace構成が変わりました。"))
+        SpaceSwitchDiagnostics.record(
+            "mc-pair-diagnostic trial=\(trial) overlay-closed=\(closed)")
+        guard closed else {
+            return .failure(SwitchFailure(
+                "MC一回実験：Mission Controlが閉じていません。"
+                + "キーボード移動は行いません。"))
+        }
+
+        // Sample late enough to catch the previously observed 350-400ms
+        // reversal. Never use a provisional SkyLight ID as a fallback trigger.
+        let started = ProcessInfo.processInfo.systemUptime
+        var snapshots: [[DisplayGroup]] = []
+        var allStable = true
+        for sample in [0.15, 0.35, 0.60, 0.85, 1.20] {
+            Thread.sleep(forTimeInterval: max(
+                0, sample - (ProcessInfo.processInfo.systemUptime - started)))
+            let layout = reader.displays(includeAppNames: false)
+            snapshots.append(layout)
+            let identitiesUnchanged = layout.count == before.count
+                && before.allSatisfy { original in
+                    layout.first(where: { $0.id == original.id })?
+                        .spaces.map(\.identity) == original.spaces.map(\.identity)
                 }
-                let ids = currentSpaceIDs(current)
-                let phase = MissionControlPairObservation.arrival(
-                    firstDisplay: first.displayID, firstTarget: first.systemID,
-                    secondDisplay: second.displayID, secondTarget: second.systemID,
-                    current: ids)
-                if phase == .arrived {
-                    SpaceSwitchDiagnostics.record(
-                        "mc-pair-once arrived \(traceLayout(current))")
-                    arrived = true
-                    break
-                }
-            }
-            guard arrived else {
+            let overlayGone = !MissionControlDirectSwitch.hasVisibleThumbnailLists()
+            allStable = allStable && identitiesUnchanged && overlayGone
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-diagnostic trial=\(trial) settle-ms=\(Int(sample * 1000))"
+                + " identitiesStable=\(identitiesUnchanged)"
+                + " overlayClosed=\(overlayGone) \(traceLayout(layout))")
+        }
+        guard snapshots.count >= 2 else {
+            return .failure(SwitchFailure("MC一回実験：診断サンプル不足です。"))
+        }
+        let previous = currentSpaceIDs(snapshots[snapshots.count - 2])
+        let latest = currentSpaceIDs(snapshots[snapshots.count - 1])
+        let decision = MissionControlPairExperimentPolicy.decide(
+            firstDisplay: first.displayID, secondDisplay: second.displayID,
+            before: initialIDs, targets: targets,
+            firstSample: previous, secondSample: latest,
+            rosterStable: allStable, missionControlClosed: closed)
+        SpaceSwitchDiagnostics.record(
+            "mc-pair-diagnostic trial=\(trial) decision=\(decision)"
+            + " sampledPrevious=\(previous) sampledLatest=\(latest)")
+        let toRepair: [String]
+        switch decision {
+        case .complete:
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-diagnostic trial=\(trial) result=mc-both-success"
+                + " pattern=\(pattern) reverse=\(reverse)")
+            return .success(())
+        case .keyboard(let displays):
+            toRepair = displays
+        case .abort:
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-diagnostic trial=\(trial) result=unsafe-abort")
+            return .failure(SwitchFailure(
+                "MC一回実験：Spaceの変化またはディスプレイ状態が不安定です。"
+                + "誤移動防止のためキーボード移動は行いません。"))
+        }
+
+        // Recheck immediately before every keyboard operation; each monitor
+        // must still be either at its initial Space or at its target.
+        for displayID in toRepair {
+            let current = reader.displays(includeAppNames: false)
+            guard !MissionControlDirectSwitch.hasVisibleThumbnailLists(),
+                  current.count == before.count,
+                  before.allSatisfy({ original in
+                      current.first(where: { $0.id == original.id })?
+                          .spaces.map(\.identity) == original.spaces.map(\.identity)
+                  }),
+                  current.allSatisfy({ display in
+                      guard let actual = display.currentID,
+                            let initial = initialIDs[display.id] else { return false }
+                      return actual == initial || actual == targets[display.id]
+                  }),
+                  current.first(where: { $0.id == displayID })?.currentID
+                    == initialIDs[displayID] else {
                 SpaceSwitchDiagnostics.record(
-                    "mc-pair-once arrival-timeout \(traceLayout(reader.displays(includeAppNames: false)))")
+                    "mc-pair-diagnostic trial=\(trial) fallback-abort"
+                    + " display=\(SpaceSwitchDiagnostics.shortDisplay(displayID))")
                 return .failure(SwitchFailure(
-                    "Mission Control一回方式で両画面の到達を3秒以内に確認できませんでした。"
-                    + "自動で切り替え直しません。"))
+                    "MC一回実験：キーボード移動直前にSpace状態が変化しました。中断します。"))
+            }
+            let target = displayID == first.displayID ? first : second
+            SpaceSwitchDiagnostics.record(
+                "mc-pair-diagnostic trial=\(trial) keyboard-fallback"
+                + " display=\(SpaceSwitchDiagnostics.shortDisplay(displayID))"
+                + " target=\(target.systemID)")
+            // A *forced* keyboard route. Neither global experiment is used,
+            // and this fallback never changes any persisted menu selection.
+            switch performSwitch(target, preferredMode: .keyboard,
+                                globalExperiment: false) {
+            case .success:
+                SpaceSwitchDiagnostics.record(
+                    "mc-pair-diagnostic trial=\(trial) keyboard-confirmed"
+                    + " display=\(SpaceSwitchDiagnostics.shortDisplay(displayID))")
+            case .failure(let error):
+                return .failure(SwitchFailure(
+                    "MC一回実験：未到達の画面をキーボードで補完できませんでした。"
+                    + error.localizedDescription))
             }
         }
 
-        // Check at multiple points to capture delayed snaps that occur
-        // hundreds of milliseconds after an apparently correct transition.
-        let startedAt = ProcessInfo.processInfo.systemUptime
-        var settled: [DisplayGroup] = []
-        for sample in [0.15, 0.35, 0.60, 0.85] {
-            Thread.sleep(forTimeInterval: max(
-                0, sample - (ProcessInfo.processInfo.systemUptime - startedAt)))
-            settled = reader.displays(includeAppNames: false)
-            SpaceSwitchDiagnostics.record(
-                "mc-pair-once settle-sample t=\(Int(sample * 1000))ms"
-                + " \(traceLayout(settled))")
-        }
-        guard SpacePairResolver.resolve(
-            pair, in: settled.flatMap(\.spaces).map(\.identity)) != nil else {
+        // Require a second stable final snapshot, including every unrelated
+        // monitor, after the last keyboard correction.
+        let finalNow = reader.displays(includeAppNames: false)
+        Thread.sleep(forTimeInterval: 0.85)
+        let finalLater = reader.displays(includeAppNames: false)
+        let finalIDs = currentSpaceIDs(finalLater)
+        let fullyArrived = currentSpaceIDs(finalNow) == finalIDs
+            && finalLater.count == before.count
+            && before.allSatisfy { original in
+                finalLater.first(where: { $0.id == original.id })?
+                    .spaces.map(\.identity) == original.spaces.map(\.identity)
+            }
+            && first.displayID != second.displayID
+            && finalIDs[first.displayID] == first.systemID
+            && finalIDs[second.displayID] == second.systemID
+            && initialIDs.allSatisfy { id, old in
+                targets[id] != nil || finalIDs[id] == old
+            }
+            && !MissionControlDirectSwitch.hasVisibleThumbnailLists()
+        SpaceSwitchDiagnostics.record(
+            "mc-pair-diagnostic trial=\(trial) finalVerified=\(fullyArrived)"
+            + " fallbackCount=\(toRepair.count)"
+            + " \(traceLayout(finalLater))")
+        guard fullyArrived else {
             return .failure(SwitchFailure(
-                "切り替え後にSpaceの識別子が変化しました。"))
+                "MC一回実験：補完後の2画面の状態が一致しません。追加操作しません。"))
         }
-        let outcome = MissionControlPairObservation.settled(
-            firstDisplay: first.displayID, firstTarget: first.systemID,
-            secondDisplay: second.displayID, secondTarget: second.systemID,
-            untouched: untouched, current: currentSpaceIDs(settled))
-        guard outcome == .confirmed else {
-            SpaceSwitchDiagnostics.record(
-                "mc-pair-once FAILED outcome=\(outcome)")
-            return .failure(SwitchFailure(
-                "Mission Control一回方式の完了後も両画面が正しいSpaceにありません"
-                + "（\(outcome)）。追加操作は行いません。"))
-        }
-        SpaceSwitchDiagnostics.record("mc-pair-once complete confirmed")
+        SpaceSwitchDiagnostics.record(
+            "mc-pair-diagnostic trial=\(trial) result=keyboard-repaired"
+            + " count=\(toRepair.count) pattern=\(pattern) reverse=\(reverse)")
         return .success(())
     }
 
@@ -587,8 +690,11 @@ final class SpaceSwitcher {
     ) -> Result<Void, Error> {
         let experiment = globalExperiment
             ?? SwitchModeSettings.globalInstantExperimentEnabled
-        let mode = preferredMode ?? GlobalInstantExperimentPolicy.singleMode(
-            enabled: experiment, selected: SwitchModeSettings.single)
+        let mode = preferredMode
+            ?? (SwitchModeSettings.globalMCOneSessionExperimentEnabled
+                ? .missionControl
+                : GlobalInstantExperimentPolicy.singleMode(
+                    enabled: experiment, selected: SwitchModeSettings.single))
         var activeMode = mode
         func markInstantFallback(_ reason: String) {
             guard activeMode == .instant else { return }
