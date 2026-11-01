@@ -1042,6 +1042,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pairSwitchItems: [PairSpaceSwitchMode: NSMenuItem] = [:]
     private var singleSwitchRootItem: NSMenuItem?
     private var pairSwitchRootItem: NSMenuItem?
+    private var globalInstantExperimentItem: NSMenuItem?
     private var instantPacingItem: NSMenuItem?
     private var missionControlWaitRootItem: NSMenuItem?
     private var missionControlResetWaitItem: NSMenuItem?
@@ -1090,6 +1091,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutMenu.addItem(recorderItem)
         shortcutRoot.submenu = shortcutMenu
         menu.addItem(shortcutRoot)
+        // This experiment is independent from the two existing 3-choice menus.
+        // Both saved modes are suspended while it is ON, not overwritten.
+        let globalInstant = NSMenuItem(
+            title: "全画面：実験的な瞬時切り替え（優先）",
+            action: #selector(toggleGlobalInstantExperiment), keyEquivalent: "")
+        globalInstant.toolTip = "単独Spaceも2画面セットも、毎回gestureを試します。"
+            + "安全に未移動を確認できた操作だけキーボードに切り替えます。"
+            + "OFFで以前の切り替え方式に戻ります。"
+        globalInstant.state = SwitchModeSettings.globalInstantExperimentEnabled ? .on : .off
+        globalInstant.target = self
+        globalInstantExperimentItem = globalInstant
+        menu.addItem(globalInstant)
+        menu.addItem(NSMenuItem.separator())
+
         // Radio-style groups: one active choice per group, persisted separately.
         let singleRoot = NSMenuItem(
             title: "単独Space：\(singleModeSummary(SwitchModeSettings.single))",
@@ -1112,6 +1127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             singleMenu.addItem(option)
         }
         singleRoot.submenu = singleMenu
+        singleRoot.isEnabled = !SwitchModeSettings.globalInstantExperimentEnabled
         menu.addItem(singleRoot)
 
         let pairRoot = NSMenuItem(
@@ -1135,6 +1151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             pairMenu.addItem(option)
         }
         pairRoot.submenu = pairMenu
+        pairRoot.isEnabled = !SwitchModeSettings.globalInstantExperimentEnabled
         menu.addItem(pairRoot)
 
         let detailRoot = NSMenuItem(title: "詳細設定", action: nil,
@@ -1143,9 +1160,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let pacing = NSMenuItem(title: "瞬時切り替え・間隔テスト（450ms）",
                                 action: #selector(toggleInstantPacingProbe),
                                 keyEquivalent: "")
-        pacing.toolTip = "単独Spaceの瞬時切り替え専用。高速ジェスチャー後の450ms安定確認です。"
+        pacing.toolTip = "gestureの成功後、450msの安定確認を行う診断設定です。"
+            + "全画面実験モードでも使えます。"
         pacing.state = InstantSwitchSettings.pacingProbeEnabled ? .on : .off
-        pacing.isEnabled = SwitchModeSettings.single == .instant
+        pacing.isEnabled = SwitchModeSettings.globalInstantExperimentEnabled
+            || SwitchModeSettings.single == .instant
         pacing.target = self
         instantPacingItem = pacing
         detailMenu.addItem(pacing)
@@ -1206,7 +1225,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func toggleGlobalInstantExperiment() {
+        SwitchModeSettings.globalInstantExperimentEnabled.toggle()
+        let enabled = SwitchModeSettings.globalInstantExperimentEnabled
+        globalInstantExperimentItem?.state = enabled ? .on : .off
+        singleSwitchRootItem?.isEnabled = !enabled
+        pairSwitchRootItem?.isEnabled = !enabled
+        instantPacingItem?.isEnabled = enabled || SwitchModeSettings.single == .instant
+        SpaceSwitchDiagnostics.record("global-instant setting enabled=\(enabled)")
+    }
+
     @objc private func selectSingleSwitchMode(_ sender: NSMenuItem) {
+        guard !SwitchModeSettings.globalInstantExperimentEnabled else { return }
         guard let raw = sender.representedObject as? String,
               let selected = SingleSpaceSwitchMode(rawValue: raw) else { return }
         SwitchModeSettings.single = selected
@@ -1219,6 +1249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func selectPairSwitchMode(_ sender: NSMenuItem) {
+        guard !SwitchModeSettings.globalInstantExperimentEnabled else { return }
         guard let raw = sender.representedObject as? String,
               let selected = PairSpaceSwitchMode(rawValue: raw) else { return }
         SwitchModeSettings.pair = selected
@@ -1230,7 +1261,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func toggleInstantPacingProbe() {
-        guard SwitchModeSettings.single == .instant else { return }
+        guard SwitchModeSettings.globalInstantExperimentEnabled
+            || SwitchModeSettings.single == .instant else { return }
         InstantSwitchSettings.pacingProbeEnabled.toggle()
         instantPacingItem?.state =
             InstantSwitchSettings.pacingProbeEnabled ? .on : .off
