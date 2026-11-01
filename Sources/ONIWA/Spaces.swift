@@ -173,6 +173,10 @@ final class SpaceSwitcher {
                 "セット内のSpaceが見つかりません。別のSpaceに置き換えず、セットを編集してください。"))
         }
 
+        let arrowBurstMode = SwitchModeSettings.arrowBurstExperimentMode
+        if arrowBurstMode != .off {
+            return performArrowBurstPair(pair, before: before, mode: arrowBurstMode)
+        }
         let numberedMode = SwitchModeSettings.desktopNumberExperimentMode
         if numberedMode != .off {
             return performNumberedPair(pair, before: before, mode: numberedMode)
@@ -467,6 +471,249 @@ final class SpaceSwitcher {
             }
         }
         SpaceSwitchDiagnostics.record("pair-hybrid complete confirmed")
+        return .success(())
+    }
+
+    /// Experimental rapid Control+Arrow bursts. Each keyboard sequence is
+    /// directed to the monitor using the same verified pointer routing as the
+    /// existing slow path. NO intermediate arrow is retried on an uncertain
+    /// result: a missed/late key makes blindly sending another one unsafe.
+    private func performArrowBurstSwitch(
+        _ target: SpaceEntry,
+        before: [DisplayGroup],
+        mode: ArrowBurstExperimentMode
+    ) -> Result<Void, Error> {
+        let trial = Int64(ProcessInfo.processInfo.systemUptime * 1000)
+        let reader = SpaceReader.shared
+        guard let group = before.first(where: { $0.id == target.displayID }),
+              let initial = group.currentID,
+              group.spaces.contains(where: { $0.identity == target.identity }),
+              before.allSatisfy({ $0.currentID != nil }),
+              let bounds = reader.displayBounds(for: target.displayID) else {
+            return .failure(SwitchFailure(
+                "連打実験：対象モニターやSpaceの情報を確認できません。"))
+        }
+        let order = group.spaces.map(\.systemID)
+        let plan = ArrowBurstPlan.make(
+            order: order, current: initial, target: target.systemID)
+        switch plan {
+        case .arrived:
+            SpaceSwitchDiagnostics.record(
+                "arrow-burst trial=\(trial) already-current"
+                + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))")
+            return .success(())
+        case .blocked(let reason):
+            SpaceSwitchDiagnostics.record(
+                "arrow-burst trial=\(trial) blocked reason=\(reason)")
+            return .failure(SwitchFailure(
+                "連打実験：移動経路を確定できません（\(reason)）。操作しません。"))
+        case .burst(let direction, let steps, let path):
+            let beforeIDs = currentSpaceIDs(before)
+            SpaceSwitchDiagnostics.record(
+                "arrow-burst trial=\(trial) begin intervalMs=\(mode.intervalMS)"
+                + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
+                + " current=\(initial) target=\(target.systemID)"
+                + " direction=\(direction == .right ? "right" : "left")"
+                + " steps=\(steps) path=\(path)"
+                + " \(traceLayout(before))")
+            let preflight = reader.displays(includeAppNames: false)
+            guard preflight.count == before.count,
+                  currentSpaceIDs(preflight) == beforeIDs,
+                  before.allSatisfy({ original in
+                      preflight.first(where: { $0.id == original.id })?
+                          .spaces.map(\.identity) == original.spaces.map(\.identity)
+                          && preflight.first(where: { $0.id == original.id })?
+                              .spaces.map(\.systemID) == original.spaces.map(\.systemID)
+                  }) else {
+                return .failure(SwitchFailure(
+                    "連打実験：キー送信直前にSpace構成が変わりました。操作しません。"))
+            }
+
+            guard routePointer(to: bounds, displayID: target.displayID) else {
+                return .failure(SwitchFailure(
+                    "連打実験：対象モニターへカーソルを移動できませんでした。"))
+            }
+            // Recheck after pointer routing. A Space change during its 140ms
+            // settling delay is a hard stop, not permission to post keys.
+            let ready = reader.displays(includeAppNames: false)
+            guard ready.count == before.count,
+                  currentSpaceIDs(ready) == beforeIDs,
+                  before.allSatisfy({ original in
+                      ready.first(where: { $0.id == original.id })?
+                          .spaces.map(\.identity) == original.spaces.map(\.identity)
+                          && ready.first(where: { $0.id == original.id })?
+                              .spaces.map(\.systemID) == original.spaces.map(\.systemID)
+                  }) else {
+                return .failure(SwitchFailure(
+                    "連打実験：送信準備中に別のSpaceへ移動しました。中断します。"))
+            }
+
+            let sent = FastArrowBurst.post(
+                direction: direction, steps: steps,
+                intervalMS: mode.intervalMS, bounds: bounds)
+            SpaceSwitchDiagnostics.record(
+                "arrow-burst trial=\(trial) posted=\(sent.posted)/\(steps)"
+                + " elapsedMs=\(sent.elapsedMS)"
+                + " reason=\(sent.reason ?? "none")")
+            guard sent.reason == nil, sent.posted == steps else {
+                return .failure(SwitchFailure(
+                    "連打実験：キー送信が途中で中断されました。"
+                    + "二重移動を避けるため追加のキーは送りません。"))
+            }
+
+            // The normal key path observes each neighbor. Here all arrow
+            // events are sent first; sample across the known delayed
+            // transitions/snapback window and validate every monitor.
+            let sampleStarted = ProcessInfo.processInfo.systemUptime
+            let allowed = [initial] + path
+            var sampleIDs: [UInt64] = []
+            for delay in [0.15, 0.35, 0.60, 0.85, 1.20] {
+                let remaining = delay - (ProcessInfo.processInfo.systemUptime - sampleStarted)
+                if remaining > 0 { Thread.sleep(forTimeInterval: remaining) }
+                let current = reader.displays(includeAppNames: false)
+                let observed = currentSpaceIDs(current)
+                let rosterStable = current.count == before.count
+                    && before.allSatisfy { prior in
+                        current.first(where: { $0.id == prior.id })?
+                            .spaces.map(\.identity) == prior.spaces.map(\.identity)
+                            && current.first(where: { $0.id == prior.id })?
+                                .spaces.map(\.systemID) == prior.spaces.map(\.systemID)
+                    }
+                let otherDisplaysStable = beforeIDs.allSatisfy { id, old in
+                    id == target.displayID || observed[id] == old
+                }
+                let actual = observed[target.displayID]
+                SpaceSwitchDiagnostics.record(
+                    "arrow-burst trial=\(trial) settleMs=\(Int(delay * 1000))"
+                    + " actual=\(actual.map(String.init) ?? "missing")"
+                    + " rosterStable=\(rosterStable)"
+                    + " othersStable=\(otherDisplaysStable)"
+                    + " \(traceLayout(current))")
+                guard rosterStable, otherDisplaysStable,
+                      let actual, allowed.contains(actual) else {
+                    SpaceSwitchDiagnostics.record(
+                        "arrow-burst trial=\(trial) result=unsafe-abort"
+                        + " reason=unexpected-space-or-display")
+                    return .failure(SwitchFailure(
+                        "連打実験：予想外のSpace移動を検出しました。"
+                        + "追加キーは送信しません。"))
+                }
+                // Backwards progress is not assumed to be recoverable.
+                if let prior = sampleIDs.last,
+                   let oldIndex = allowed.firstIndex(of: prior),
+                   let newIndex = allowed.firstIndex(of: actual),
+                   newIndex < oldIndex {
+                    SpaceSwitchDiagnostics.record(
+                        "arrow-burst trial=\(trial) result=unsafe-abort"
+                        + " reason=space-snapback")
+                    return .failure(SwitchFailure(
+                        "連打実験：Spaceが途中で戻りました。追加操作を停止しました。"))
+                }
+                sampleIDs.append(actual)
+            }
+            guard sampleIDs.count >= 2,
+                  sampleIDs[sampleIDs.count - 1] == target.systemID,
+                  sampleIDs[sampleIDs.count - 2] == target.systemID else {
+                SpaceSwitchDiagnostics.record(
+                    "arrow-burst trial=\(trial) result=incomplete"
+                    + " observed=\(sampleIDs)"
+                    + " expected=\(target.systemID)"
+                    + " no-fallback=true")
+                return .failure(SwitchFailure(
+                    "連打実験：予定回数のキーを送信しましたが目的Spaceへ到達しませんでした。"
+                    + "誤移動を避けるため自動補完しません。"))
+            }
+            SpaceSwitchDiagnostics.record(
+                "arrow-burst trial=\(trial) result=direct-success"
+                + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))"
+                + " steps=\(steps) intervalMs=\(mode.intervalMS)"
+                + " final=\(sampleIDs.last!)")
+            return .success(())
+        }
+    }
+
+    private func performArrowBurstPair(
+        _ pair: SpacePair,
+        before: [DisplayGroup],
+        mode: ArrowBurstExperimentMode
+    ) -> Result<Void, Error> {
+        let reader = SpaceReader.shared
+        guard let resolved = SpacePairResolver.resolve(
+                  pair, in: before.flatMap(\.spaces).map(\.identity)),
+              let first = before.flatMap(\.spaces).first(where: { $0.identity == resolved.0 }),
+              let second = before.flatMap(\.spaces).first(where: { $0.identity == resolved.1 }),
+              first.displayID != second.displayID,
+              before.allSatisfy({ $0.currentID != nil }) else {
+            return .failure(SwitchFailure(
+                "連打実験：セットの2画面を特定できません。"))
+        }
+        SpaceSwitchDiagnostics.beginWorkspaceTrace()
+        defer { SpaceSwitchDiagnostics.endWorkspaceTrace() }
+        SpaceSwitchDiagnostics.record(
+            "arrow-burst-pair begin intervalMs=\(mode.intervalMS)"
+            + " first=\(SpaceSwitchDiagnostics.shortDisplay(first.displayID)):\(first.systemID)"
+            + " second=\(SpaceSwitchDiagnostics.shortDisplay(second.displayID)):\(second.systemID)")
+        switch performArrowBurstSwitch(first, before: before, mode: mode) {
+        case .failure(let error):
+            return .failure(SwitchFailure(
+                "連打実験：1画面目の移動に失敗しました。"
+                + "2画面目は操作していません。\(error.localizedDescription)"))
+        case .success: break
+        }
+        let middle = reader.displays(includeAppNames: false)
+        let originalIDs = currentSpaceIDs(before)
+        guard middle.count == before.count,
+              before.allSatisfy({ old in
+                  middle.first(where: { $0.id == old.id })?
+                      .spaces.map(\.identity) == old.spaces.map(\.identity)
+                      && middle.first(where: { $0.id == old.id })?
+                          .spaces.map(\.systemID) == old.spaces.map(\.systemID)
+              }),
+              middle.first(where: { $0.id == first.displayID })?.currentID
+                == first.systemID,
+              originalIDs.allSatisfy({ id, old in
+                  id == first.displayID
+                      || middle.first(where: { $0.id == id })?.currentID == old
+              }) else {
+            return .failure(SwitchFailure(
+                "連打実験：1画面目の完了後に想定外のSpace変化を検出しました。"
+                + "2画面目は操作しません。"))
+        }
+        switch performArrowBurstSwitch(second, before: middle, mode: mode) {
+        case .failure(let error):
+            return .failure(SwitchFailure(
+                "連打実験：2画面目の移動に失敗しました。"
+                + "追加操作は行いません。\(error.localizedDescription)"))
+        case .success: break
+        }
+
+        let after = reader.displays(includeAppNames: false)
+        Thread.sleep(forTimeInterval: 0.85)
+        let settled = reader.displays(includeAppNames: false)
+        let afterIDs = currentSpaceIDs(after)
+        let finalIDs = currentSpaceIDs(settled)
+        let finalVerified = afterIDs == finalIDs
+            && settled.count == before.count
+            && before.allSatisfy({ old in
+                settled.first(where: { $0.id == old.id })?
+                    .spaces.map(\.identity) == old.spaces.map(\.identity)
+                    && settled.first(where: { $0.id == old.id })?
+                        .spaces.map(\.systemID) == old.spaces.map(\.systemID)
+            })
+            && originalIDs.allSatisfy({ id, old in
+                if id == first.displayID { return finalIDs[id] == first.systemID }
+                if id == second.displayID { return finalIDs[id] == second.systemID }
+                return finalIDs[id] == old
+            })
+        SpaceSwitchDiagnostics.record(
+            "arrow-burst-pair finalVerified=\(finalVerified)"
+            + " intervalMs=\(mode.intervalMS) \(traceLayout(settled))")
+        guard finalVerified else {
+            return .failure(SwitchFailure(
+                "連打実験：2画面セットの最終状態が一致しません。追加操作しません。"))
+        }
+        SpaceSwitchDiagnostics.record(
+            "arrow-burst-pair result=pair-complete intervalMs=\(mode.intervalMS)")
         return .success(())
     }
 
@@ -1115,12 +1362,14 @@ final class SpaceSwitcher {
         let experiment = globalExperiment
             ?? SwitchModeSettings.globalInstantExperimentEnabled
         let mode = preferredMode
-            ?? (SwitchModeSettings.desktopNumberExperimentMode != .off
+            ?? (SwitchModeSettings.arrowBurstExperimentMode != .off
                 ? .keyboard
-                : (SwitchModeSettings.globalMCOneSessionExperimentEnabled
+                : (SwitchModeSettings.desktopNumberExperimentMode != .off
+                    ? .keyboard
+                    : (SwitchModeSettings.globalMCOneSessionExperimentEnabled
                     ? .missionControl
                     : GlobalInstantExperimentPolicy.singleMode(
-                        enabled: experiment, selected: SwitchModeSettings.single)))
+                        enabled: experiment, selected: SwitchModeSettings.single))))
         var activeMode = mode
         func markInstantFallback(_ reason: String) {
             guard activeMode == .instant else { return }
@@ -1172,6 +1421,13 @@ final class SpaceSwitcher {
             // from the name inferred by ONIWA; capture that association too.
             traceSpaceMapping(target, reader: reader)
             return .success(())
+        }
+
+        if preferredMode == nil
+            && SwitchModeSettings.arrowBurstExperimentMode != .off {
+            return performArrowBurstSwitch(
+                target, before: initialDisplays,
+                mode: SwitchModeSettings.arrowBurstExperimentMode)
         }
 
         if preferredMode == nil
