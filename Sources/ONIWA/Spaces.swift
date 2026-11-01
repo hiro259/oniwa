@@ -474,10 +474,11 @@ final class SpaceSwitcher {
         return .success(())
     }
 
-    /// Experimental rapid Control+Arrow bursts. Each keyboard sequence is
-    /// directed to the monitor using the same verified pointer routing as the
-    /// existing slow path. NO intermediate arrow is retried on an uncertain
-    /// result: a missed/late key makes blindly sending another one unsafe.
+    /// Standard rapid Control+Arrow switching (50ms in ordinary builds).
+    /// Each burst uses the verified per-monitor pointer route. NO intermediate
+    /// arrow is retried on an uncertain result: a missed/late key makes blind
+    /// additional movement unsafe. Legacy switchers remain implemented for
+    /// regression research: https://github.com/hiro259/oniwa/issues/15
     private func performArrowBurstSwitch(
         _ target: SpaceEntry,
         before: [DisplayGroup],
