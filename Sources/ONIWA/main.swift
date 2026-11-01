@@ -595,20 +595,41 @@ private struct LiveSpaceReorderDelegate: DropDelegate {
 
 struct SearchView: View {
     @ObservedObject var state: SearchState
+    @AppStorage(PaletteDesign.settingsKey) private var paletteRaw = PaletteDesign.nativeCalm.rawValue
+    private var design: PaletteDesign { PaletteDesign(rawValue: paletteRaw) ?? .nativeCalm }
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isTagInputFocused: Bool
     @State private var draggingOrderKey: String?
 
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("ONIWA").font(.headline)
-                Spacer()
-                Text(state.shortcutDescription).foregroundStyle(.secondary).font(.caption)
+        VStack(alignment: .leading, spacing: design.stackSpacing) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ONIWA").font(design.headingFont)
+                    if design.showsSubtitle {
+                        Text(design.detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(state.shortcutDescription)
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
             }
             TextField("Space・セット・タグを検索…", text: $state.query)
                 .textFieldStyle(.roundedBorder)
+                .font(design.searchFont)
+                .controlSize(design == .commandCompact ? .small : .regular)
+                .padding(.vertical, design.hasMaterialSurface ? 4 : 0)
+                .padding(.horizontal, design.hasMaterialSurface ? 5 : 0)
+                .background {
+                    if design.hasMaterialSurface {
+                        RoundedRectangle(cornerRadius: 11).fill(.regularMaterial)
+                    }
+                }
                 .focused($isSearchFocused)
                 .onSubmit { state.activateSelected() }
             HStack(spacing: 6) {
@@ -640,18 +661,27 @@ struct SearchView: View {
             }
             ScrollViewReader { scroll in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 3) {
+                    LazyVStack(alignment: .leading, spacing: design.rowSpacing) {
                     ForEach(state.orderedItems) { item in
                         switch item {
                         case .pair(let pair):
                         let destination = state.resolvedSpaces(for: pair)
                         let isCurrent = destination.map { $0.0.isCurrent && $0.1.isCurrent } ?? false
-                        HStack(spacing: 9) {
+                        HStack(spacing: design == .studioCards ? 13 : 9) {
                             Image(systemName: "square.on.square")
                                 .foregroundStyle(.secondary)
+                                .frame(width: design.leadingIconWidth)
+                                .padding(.vertical, design == .studioCards ? 8 : 0)
+                                .background {
+                                    if design == .studioCards {
+                                        RoundedRectangle(cornerRadius: 9)
+                                            .fill(Color.accentColor.opacity(0.12))
+                                    }
+                                }
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack {
                                     Text(pair.name)
+                                        .font(design.titleFont)
                                         .fontWeight(state.pairResultID(pair) == state.selectedID
                                             || isCurrent ? .semibold : .regular)
                                         .lineLimit(1)
@@ -672,6 +702,11 @@ struct SearchView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
+                                    if design.showsMonitorBadge {
+                                        Label("2画面セット", systemImage: "display.2")
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                    }
                                 } else {
                                     Label("Spaceが見つかりません · セットを再設定してください",
                                           systemImage: "exclamationmark.triangle")
@@ -710,14 +745,15 @@ struct SearchView: View {
                             .buttonStyle(.borderless)
                             .help("セットを編集または削除")
                         }
-                        .padding(8)
+                        .padding(.horizontal, design.rowHorizontalPadding)
+                        .padding(.vertical, design.rowVerticalPadding)
                         .background(state.pairResultID(pair) == state.selectedID
-                            ? Color.accentColor.opacity(0.16)
-                            : (isCurrent ? Color.secondary.opacity(0.04) : Color.clear))
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                            ? Color.accentColor.opacity(design.selectedOpacity)
+                            : (isCurrent ? Color.secondary.opacity(0.055) : design.idleColor))
+                        .clipShape(RoundedRectangle(cornerRadius: design.rowCornerRadius))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 7)
-                                .strokeBorder(isCurrent ? Color.secondary.opacity(0.38) : Color.clear,
+                            RoundedRectangle(cornerRadius: design.rowCornerRadius)
+                                .strokeBorder(isCurrent ? Color.secondary.opacity(0.40) : Color.clear,
                                               lineWidth: 1)
                                 .allowsHitTesting(false)
                         }
@@ -737,14 +773,23 @@ struct SearchView: View {
                                 state: state, draggingKey: $draggingOrderKey)
                         )
                         case .space(let space):
-                        HStack(spacing: 9) {
+                        HStack(spacing: design == .studioCards ? 13 : 9) {
                             Image(systemName: space.kind == 4 ? "arrow.up.left.and.arrow.down.right" : "display")
                                 .foregroundStyle(.secondary)
+                                .frame(width: design.leadingIconWidth)
+                                .padding(.vertical, design == .studioCards ? 8 : 0)
+                                .background {
+                                    if design == .studioCards {
+                                        RoundedRectangle(cornerRadius: 9)
+                                            .fill(Color.accentColor.opacity(0.12))
+                                    }
+                                }
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
                                     Text(state.labels.label(for: space.identity)?.name.isEmpty == false
                                          ? (state.labels.label(for: space.identity)?.name ?? space.defaultName)
                                          : space.defaultName)
+                                        .font(design.titleFont)
                                         .fontWeight(space.id == state.selectedID || space.isCurrent
                                             ? .semibold : .regular)
                                         .lineLimit(1)
@@ -759,9 +804,19 @@ struct SearchView: View {
                                             .help("このモニターで現在表示されているSpace")
                                     }
                                 }
-                                Text("\(space.displayName) · Space \(space.index + 1)")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                                HStack(spacing: 6) {
+                                    if design.showsMonitorBadge {
+                                        Text("M\((state.groups.firstIndex(where: { $0.id == space.displayID }) ?? 0) + 1)")
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                                    }
+                                    Text("\(space.displayName) · Space \(space.index + 1)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
                                 // Saved search keywords and current apps appear
                                 // as tags, but only the manual tags are persisted.
                                 let manualTags = state.labels.label(for: space.identity)?.searchTags ?? []
@@ -818,17 +873,16 @@ struct SearchView: View {
                             .buttonStyle(.borderless)
                             .help("Rename or add aliases")
                         }
-                        .padding(8)
-                        // The accent background indicates keyboard selection.
-                        // A subtle neutral border and "current" badge indicate the
-                        // visible Space, even when another result is selected.
+                        .padding(.horizontal, design.rowHorizontalPadding)
+                        .padding(.vertical, design.rowVerticalPadding)
+                        // Selection remains an accent tint; current is always neutral.
                         .background(space.id == state.selectedID
-                            ? Color.accentColor.opacity(0.16)
-                            : (space.isCurrent ? Color.secondary.opacity(0.04) : Color.clear))
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                            ? Color.accentColor.opacity(design.selectedOpacity)
+                            : (space.isCurrent ? Color.secondary.opacity(0.055) : design.idleColor))
+                        .clipShape(RoundedRectangle(cornerRadius: design.rowCornerRadius))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 7)
-                                .strokeBorder(space.isCurrent ? Color.secondary.opacity(0.38) : Color.clear,
+                            RoundedRectangle(cornerRadius: design.rowCornerRadius)
+                                .strokeBorder(space.isCurrent ? Color.secondary.opacity(0.40) : Color.clear,
                                               lineWidth: 1)
                                 .allowsHitTesting(false)
                         }
@@ -870,8 +924,15 @@ struct SearchView: View {
                     .buttonStyle(.borderless)
             }
         }
-        .padding(16)
-        .frame(width: 500, height: 420)
+        .padding(design.contentPadding)
+        .frame(width: design.panelSize.width, height: design.panelSize.height)
+        .background {
+            if design.hasMaterialSurface {
+                Rectangle().fill(.thinMaterial)
+            } else {
+                design.canvasColor
+            }
+        }
         .onAppear { isSearchFocused = true }
         .onChange(of: state.query) { _ in state.selectedID = state.allResultIDs.first }
         .onChange(of: state.orderingRevision) { _ in
