@@ -728,19 +728,15 @@ final class SpaceSwitcher {
                     + "追加のキー操作は行いません。"))
             }
         } else {
+            var expectedIDs = baselineIDs
             for (target, preparation) in preparations {
                 let groupBaseline = reader.displays(includeAppNames: false)
                 let startIDs = currentSpaceIDs(groupBaseline)
-                guard groupBaseline.count == before.count,
+                guard startIDs == expectedIDs,
+                      groupBaseline.count == before.count,
                       before.allSatisfy({ old in
                           groupBaseline.first(where: { $0.id == old.id })?
                               .spaces.map(\.identity) == old.spaces.map(\.identity)
-                      }),
-                      targets.allSatisfy({ id, entry in
-                          let expected = id == target.displayID
-                              ? baselineIDs[id] : (startIDs[id] ?? 0)
-                          return startIDs[id] == expected
-                              || startIDs[id] == entry.systemID
                       }) else {
                     return .failure(SwitchFailure(
                         "番号指定の逐次移動前にSpace構成が変化しました。"))
@@ -790,6 +786,7 @@ final class SpaceSwitcher {
                             + "追加操作は行いません。"))
                     }
                 }
+                expectedIDs[target.displayID] = target.systemID
             }
         }
         switch verifyNumberedFinal(baseline: before, targets: targets, trial: trial) {
