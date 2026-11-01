@@ -1014,7 +1014,9 @@ struct SearchView: View {
         .padding(design.contentPadding)
         .frame(width: design.panelSize.width, height: design.panelSize.height)
         .background {
-            if design.hasMaterialSurface {
+            if design == .macOSNative {
+                Rectangle().fill(.ultraThinMaterial)
+            } else if design.hasMaterialSurface {
                 Rectangle().fill(.thinMaterial)
             } else {
                 design.canvasColor
@@ -1725,6 +1727,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.runModal()
     }
 
+    private func applyPaletteWindowStyle(_ choice: PaletteDesign) {
+        guard let panel else { return }
+        let glass = choice == .macOSNative
+        // The transparent panel backing allows ultraThinMaterial to sample
+        // the actual desktop rather than an opaque window background.
+        panel.isOpaque = !glass
+        panel.backgroundColor = glass ? .clear : .windowBackgroundColor
+        panel.titlebarAppearsTransparent = glass
+        panel.titleVisibility = glass ? .hidden : .visible
+    }
+
     @objc private func selectPaletteDesign(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String,
               let choice = PaletteDesign(rawValue: raw) else { return }
@@ -1734,6 +1747,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // SearchView observes the same preference through @AppStorage, so
         // results, current selection, query and keyboard routing are retained.
+        applyPaletteWindowStyle(choice)
         panel?.setContentSize(NSSize(width: choice.panelSize.width,
                                      height: choice.panelSize.height))
         if panel?.isVisible == true { panel?.center() }
@@ -1846,6 +1860,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.contentView = NSHostingView(rootView: SearchView(state: state))
             panel = window
+            applyPaletteWindowStyle(PaletteDesign.selected())
         }
         panel?.center()
         NSApp.activate(ignoringOtherApps: true)
