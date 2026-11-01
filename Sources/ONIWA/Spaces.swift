@@ -1091,10 +1091,12 @@ final class SpaceSwitcher {
         let experiment = globalExperiment
             ?? SwitchModeSettings.globalInstantExperimentEnabled
         let mode = preferredMode
-            ?? (SwitchModeSettings.globalMCOneSessionExperimentEnabled
-                ? .missionControl
-                : GlobalInstantExperimentPolicy.singleMode(
-                    enabled: experiment, selected: SwitchModeSettings.single))
+            ?? (SwitchModeSettings.desktopNumberExperimentMode != .off
+                ? .keyboard
+                : (SwitchModeSettings.globalMCOneSessionExperimentEnabled
+                    ? .missionControl
+                    : GlobalInstantExperimentPolicy.singleMode(
+                        enabled: experiment, selected: SwitchModeSettings.single)))
         var activeMode = mode
         func markInstantFallback(_ reason: String) {
             guard activeMode == .instant else { return }
@@ -1146,6 +1148,24 @@ final class SpaceSwitcher {
             // from the name inferred by ONIWA; capture that association too.
             traceSpaceMapping(target, reader: reader)
             return .success(())
+        }
+
+        if preferredMode == nil
+            && SwitchModeSettings.desktopNumberExperimentMode != .off {
+            switch DesktopNumberShortcut.prepare(target, in: initial) {
+            case .ready(let shortcut):
+                SpaceSwitchDiagnostics.record(
+                    "desktop-number single selected desktop=\(shortcut.number)"
+                    + " display=\(SpaceSwitchDiagnostics.shortDisplay(target.displayID))")
+                return performNumberedSingle(
+                    target, before: initialDisplays, shortcut: shortcut)
+            case .fallback(let reason):
+                SpaceSwitchDiagnostics.record(
+                    "desktop-number single skipped-numeric reason=\(reason)"
+                    + " fallback=keyboard")
+                // The saved normal mode is suspended while this experiment
+                // is enabled; the existing keyboard path is verified.
+            }
         }
 
         if mode == .missionControl {
