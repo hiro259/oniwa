@@ -5,6 +5,18 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 
 **Status: working prototype on `main` (Issue #1).** Search, names, shortcut handling, instant Space switching and switching between two displays have been verified on a real Mac. Sidecar, display reconnection and more complex fullscreen cases still need additional checks.
 
+## Default Space switching on the `feat/issue-11-space-pairs` branch
+
+**The standard strategy is now the 50ms rapid `Control+←/→` burst** for both single Spaces and two-monitor Space sets.
+
+- ONIWA reads the current Space order and UUID identities, then sends exactly the adjacent-arrow presses needed, 50ms apart. It does **not** wait for each intermediate Space, nor open Mission Control.
+- After the burst it verifies target and unrelated displays' Space IDs and stable UUID/order at 150, 350, 600, 850 and 1200ms. If the destination is wrong, the layout changes, or the state remains uncertain, ONIWA **stops without extra arrows or automatic rollback**.
+- Two-monitor switching is sequential: finish and verify display 1, then switch and verify display 2, followed by a final cross-display readback. This is a single *user action*, not simultaneous macOS events.
+- Ordinary installations **always select 50ms on startup**, including installations that previously saved a gesture/MC/numbered-Desktop experiment mode. No OS shortcut preferences, SIP settings or display settings are changed.
+- The menu shows **切り替え方式：⌃←/→ 高速連打（50ms・標準）**. The earlier Mission Control, synthetic swipe, 100ms burst, numbered Desktop and step-by-step switchers are retained in source for future comparison, but their controls are hidden from normal builds. Developers can compile with the optional Swift define `ONIWA_LEGACY_SWITCHING_UI` to expose the archived menu and saved experimental routing again.
+- **Real-Mac evidence (2026-11-01):** all 13 sampled 50ms burst switches and all five sampled paired switches completed and passed the delayed ID checks; jumps up to seven neighboring Spaces were observed. This is promising, **not** a claim of universal reliability.
+- Research log: [Issue #15](https://github.com/hiro259/oniwa/issues/15); ongoing pair feature: [Issue #11](https://github.com/hiro259/oniwa/issues/11); code under [Draft PR #14](https://github.com/hiro259/oniwa/pull/14).
+
 ## First prototype
 
 - **New installations:** `⌥ Option + Space` opens the search palette by default. Existing installations retain their previously selected shortcut until changed. The menu-bar **庭** remains the fallback if a combination is intercepted by macOS.
@@ -25,7 +37,7 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 - On an empty query results retain their existing order; a query containing only tag separators does not accidentally select an arbitrary Space.
 
 - Labels are local UserDefaults data. No analytics or network requests.
-- Space discovery uses private **read-only** SkyLight symbols. Switching posts the standard `Ctrl+← / →` shortcut through Core Graphics with a **HID-system-state event source**, explicit Control-key down/up, and the arrow-key Fn/NumericPad flags required on some macOS versions (not AppleScript/System Events). It now confirms **each neighboring Space** before continuing; it stops on unexpected movement, missing/recreated Spaces, or changed monitor identity, but safely replans from a fresh layout when macOS merely permutes the same UUID-backed Spaces.
+- Space discovery uses private **read-only** SkyLight symbols. Switching posts the standard `Ctrl+← / →` shortcut through Core Graphics with a **HID-system-state event source**, explicit Control-key down/up, and the arrow-key Fn/NumericPad flags required on some macOS versions (not AppleScript/System Events). The **legacy step-by-step route** confirms each neighboring Space before continuing, whereas the new standard 50ms burst verifies the **settled final state**. Both stop on unexpected movement, missing/recreated Spaces, or changed monitor identity. The legacy route can replan after a pure UUID-preserving reorder; the rapid burst intentionally stops instead of continuing through a changed order.
 
 ## Space naming and persistence (Issue #3)
 
@@ -58,7 +70,7 @@ Unit tests in `SpaceLabelsTests.swift` cover persistence, safe deletion, multi-m
 - Set targets use **display ID + Space UUID**, never Space number or window title. A Space without a UUID cannot be saved in a set (it cannot be reliably identified after relaunch). Pair data persists locally in UserDefaults, separate from individual Space labels.
 - Switching is **sequential and verified**: first monitor, then second. If a target is already visible it is skipped. The first monitor's target is rechecked before the second transition; final IDs on both monitors and unrelated displays are checked after switching.
 - A partially failed set displays the error and which step reached its target. ONIWA does **not** automatically roll back a successful first transition because a rollback could itself select an unintended Space.
-- Both the instant Space-switch path and the existing verified normal Control+Arrow fallback are reused. The private macOS SkyLight API is still only read.
+- The default pair path uses the 50ms Control+Arrow burst described above. Historical instant, Mission Control and verified one-step keyboard implementations remain in source for investigation; SkyLight is still read-only.
 
 ### Switching target diagnostics (2026-10-30)
 
