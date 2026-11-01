@@ -1696,15 +1696,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func promptMissionControlCustomWait() {
         let alert = NSAlert()
-        alert.messageText = "Mission Controlの待機時間"
-        alert.informativeText = "100〜1000msの整数で入力してください。"
-            + "300msが推奨値です。300ms未満では切り替えに失敗する可能性があります。"
-        alert.addButton(withTitle: "設定")
-        alert.addButton(withTitle: "キャンセル")
+        alert.messageText = t("Mission Controlの待機時間", "Mission Control wait time")
+        alert.informativeText = t("100〜1000msで設定してください（推奨：300ms）。",
+                                 "Enter 100–1000 ms (recommended: 300 ms).")
+        alert.addButton(withTitle: t("設定", "Set"))
+        alert.addButton(withTitle: t("キャンセル", "Cancel"))
 
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.stringValue = String(MissionControlDirectSettings.readinessWaitMilliseconds)
-        field.placeholderString = "例：275"
+        field.placeholderString = t("例：275", "e.g. 275")
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         NSApp.activate(ignoringOtherApps: true)
@@ -1715,8 +1715,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               MissionControlDirectSettings.isValidReadinessWait(milliseconds) else {
             let warning = NSAlert()
             warning.alertStyle = .warning
-            warning.messageText = "待機時間を変更できませんでした"
-            warning.informativeText = "100〜1000の整数を入力してください。設定は変更されていません。"
+            warning.messageText = t("待機時間を変更できませんでした", "Couldn't change wait time")
+            warning.informativeText = t("100〜1000の整数を入力してください。設定は変更されていません。", "Enter a number from 100 to 1000. Nothing changed.")
             warning.runModal()
             return
         }
@@ -1735,8 +1735,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let chosen = MissionControlDirectSettings.readinessWaitMilliseconds
         let recommended = chosen == MissionControlDirectSettings.defaultReadinessWaitMilliseconds
         missionControlWaitRootItem?.title = recommended
-            ? "Mission Control待機時間：300ms（推奨）"
-            : "Mission Control待機時間：\(chosen)ms"
+            ? t("Mission Control待機時間：300ms（推奨）", "Mission Control wait: 300 ms (recommended)")
+            : t("Mission Control待機時間：\(chosen)ms", "Mission Control wait: \(chosen) ms")
         missionControlResetWaitItem?.isEnabled = !recommended
     }
 
@@ -1768,15 +1768,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let recorder = ShortcutRecorderView(frame: NSRect(x: 0, y: 0, width: 390, height: 102))
         let alert = NSAlert()
-        alert.messageText = "ショートカットを記録"
-        alert.informativeText = """
-        使いたいキーをそのまま押してください。⌘・⌃・⌥のいずれかが必要です。
-        初期候補は ⌥ Space。保存できない場合は元のキーに戻します。
-        """
+        alert.messageText = t("ショートカットを記録", "Record shortcut")
+        alert.informativeText = t(
+            "使いたいキーを押してください（⌘・⌃・⌥のいずれかが必要）。",
+            "Press your shortcut (include ⌘, ⌃ or ⌥)."
+        )
         alert.alertStyle = .informational
         alert.accessoryView = recorder
-        alert.addButton(withTitle: "設定する")
-        alert.addButton(withTitle: "キャンセル")
+        alert.addButton(withTitle: t("設定する", "Apply"))
+        alert.addButton(withTitle: t("キャンセル", "Cancel"))
         DispatchQueue.main.async {
             alert.window.makeFirstResponder(recorder)
         }
@@ -1789,8 +1789,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let candidate = recorder.recorded else {
             _ = shortcut.endRecording(nil)
             let warning = NSAlert()
-            warning.messageText = "キーが記録されていません"
-            warning.informativeText = "記録欄をクリックしてキーの組み合わせを押してください。"
+            warning.messageText = t("キーが記録されていません", "No shortcut recorded")
+            warning.informativeText = t("記録欄をクリックしてキーの組み合わせを押してください。", "Click the recorder and press your shortcut.")
             warning.runModal()
             return
         }
@@ -1804,8 +1804,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showShortcutFailure() {
         let alert = NSAlert()
-        alert.messageText = "ショートカットの設定に失敗しました"
-        alert.informativeText = shortcut?.registrationError ?? "macOSまたは別のアプリと競合している可能性があります。"
+        alert.messageText = t("ショートカットの設定に失敗しました", "Couldn't set shortcut")
+        alert.informativeText = shortcut?.registrationError ?? t("macOSまたは別のアプリと競合している可能性があります。", "macOS or another app may be using this shortcut.")
         alert.alertStyle = .warning
         alert.runModal()
     }
@@ -1842,20 +1842,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.open(url)
         } else {
             let alert = NSAlert()
-            alert.messageText = "切り替え診断ログはまだありません"
-            alert.informativeText = "Spaceの切り替えを一度行うと、ローカルに記録されます。"
+            alert.messageText = t("切り替え診断ログはまだありません", "No switching log yet")
+            alert.informativeText = t("Spaceの切り替えを一度行うと、ローカルに記録されます。", "Switch a Space to create a local diagnostic log.")
             alert.runModal()
         }
     }
 
     @objc private func showShortcutDiagnosis() {
         let alert = NSAlert()
-        alert.messageText = "ONIWA ショートカット診断"
+        alert.messageText = t("ONIWA ショートカット診断", "ONIWA shortcut diagnostics")
         let keyboardStatus = CGPreflightPostEventAccess()
-            ? "許可済み（Core Graphics）" : "未許可（アクセシビリティの設定を確認）"
+            ? t("許可済み（Core Graphics）", "Granted (Core Graphics)") : t("未許可（アクセシビリティの設定を確認）", "Not granted (check Accessibility settings)")
         let hotkeyStatus = shortcut?.diagnosticSummary()
-            ?? "ショートカット管理が開始されていません。"
-        alert.informativeText = hotkeyStatus + "\n\nキー操作の送信権限: " + keyboardStatus
+            ?? t("ショートカット管理が開始されていません。", "Shortcut manager isn't running.")
+        alert.informativeText = hotkeyStatus + t("\n\nキー操作の送信権限: ", "\n\nKey posting permission: ") + keyboardStatus
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
