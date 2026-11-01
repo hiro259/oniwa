@@ -778,24 +778,29 @@ struct SearchView: View {
                                             object: "pair:\(pair.id.uuidString)" as NSString)
                                     }
                             }
-                            Button {
-                                state.togglePin(pair)
-                            } label: {
-                                Image(systemName: state.isPinned(pair) ? "pin.fill" : "pin")
-                                    .foregroundStyle(state.isPinned(pair)
-                                        ? design.controlAccent : Color.secondary)
+                            HStack(spacing: 9) {
+                                Button {
+                                    state.togglePin(pair)
+                                } label: {
+                                    Image(systemName: state.isPinned(pair) ? "pin.fill" : "pin")
+                                        .foregroundStyle(state.isPinned(pair)
+                                            ? design.controlAccent : Color.secondary)
+                                }
+                                .buttonStyle(.borderless)
+                                .help(state.isPinned(pair) ? "ピン留めを解除" : "一覧の先頭にピン留め")
+                                .accessibilityLabel(state.isPinned(pair)
+                                    ? "セットのピン留めを解除" : "セットをピン留め")
+                                Button {
+                                    state.beginPairEdit(pair)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("セットを編集または削除")
                             }
-                            .buttonStyle(.borderless)
-                            .help(state.isPinned(pair) ? "ピン留めを解除" : "一覧の先頭にピン留め")
-                            .accessibilityLabel(state.isPinned(pair)
-                                ? "セットのピン留めを解除" : "セットをピン留め")
-                            Button {
-                                state.beginPairEdit(pair)
-                            } label: {
-                                Image(systemName: "pencil")
-                            }
-                            .buttonStyle(.borderless)
-                            .help("セットを編集または削除")
+                            .modifier(PaletteHoverActions(
+                                isVisible: design != .macOSNative
+                                    || hoveredItemID == state.pairResultID(pair)))
                         }
                         .padding(.horizontal, design.rowHorizontalPadding)
                         .padding(.vertical, design.rowVerticalPadding)
@@ -818,6 +823,14 @@ struct SearchView: View {
                                 hoveredItemID = state.pairResultID(pair)
                             } else if hoveredItemID == state.pairResultID(pair) {
                                 hoveredItemID = nil
+                            }
+                        }
+                        .contextMenu {
+                            if design == .macOSNative {
+                                Button(state.isPinned(pair) ? "ピン留めを解除" : "ピン留め") {
+                                    state.togglePin(pair)
+                                }
+                                Button("セットを編集") { state.beginPairEdit(pair) }
                             }
                         }
                         .id(state.pairResultID(pair))
@@ -909,27 +922,31 @@ struct SearchView: View {
                                         return NSItemProvider(object: key as NSString)
                                     }
                             }
-                            Button {
-                                state.togglePin(space)
-                            } label: {
-                                Image(systemName: state.isPinned(space) ? "pin.fill" : "pin")
-                                    .foregroundStyle(state.isPinned(space)
-                                        ? design.controlAccent : Color.secondary)
+                            HStack(spacing: 9) {
+                                Button {
+                                    state.togglePin(space)
+                                } label: {
+                                    Image(systemName: state.isPinned(space) ? "pin.fill" : "pin")
+                                        .foregroundStyle(state.isPinned(space)
+                                            ? design.controlAccent : Color.secondary)
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(space.identity.persistentKey == nil)
+                                .help(space.identity.persistentKey == nil
+                                    ? "UUIDのないSpaceは再起動後のピン留めを保存できません"
+                                    : (state.isPinned(space) ? "ピン留めを解除" : "一覧の先頭にピン留め"))
+                                .accessibilityLabel(state.isPinned(space)
+                                    ? "Spaceのピン留めを解除" : "Spaceをピン留め")
+                                Button {
+                                    state.beginEdit(space)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Rename or add aliases")
                             }
-                            .buttonStyle(.borderless)
-                            .disabled(space.identity.persistentKey == nil)
-                            .help(space.identity.persistentKey == nil
-                                ? "UUIDのないSpaceは再起動後のピン留めを保存できません"
-                                : (state.isPinned(space) ? "ピン留めを解除" : "一覧の先頭にピン留め"))
-                            .accessibilityLabel(state.isPinned(space)
-                                ? "Spaceのピン留めを解除" : "Spaceをピン留め")
-                            Button {
-                                state.beginEdit(space)
-                            } label: {
-                                Image(systemName: "pencil")
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Rename or add aliases")
+                            .modifier(PaletteHoverActions(
+                                isVisible: design != .macOSNative || hoveredItemID == space.id))
                         }
                         .padding(.horizontal, design.rowHorizontalPadding)
                         .padding(.vertical, design.rowVerticalPadding)
@@ -950,6 +967,15 @@ struct SearchView: View {
                                 hoveredItemID = space.id
                             } else if hoveredItemID == space.id {
                                 hoveredItemID = nil
+                            }
+                        }
+                        .contextMenu {
+                            if design == .macOSNative {
+                                Button(state.isPinned(space) ? "ピン留めを解除" : "ピン留め") {
+                                    state.togglePin(space)
+                                }
+                                .disabled(space.identity.persistentKey == nil)
+                                Button("名前・タグを編集") { state.beginEdit(space) }
                             }
                         }
                         .id(space.id)
