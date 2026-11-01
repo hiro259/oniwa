@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import ONIWACore
 
-/// Presentation-only tokens shared by the seven palette presets.
+/// Presentation-only tokens shared by the eight palette presets.
 /// Use system colors/materials so light/dark appearance and accessibility
 /// contrast remain legible; no OS-version-specific Liquid Glass dependency.
 /// The chosen design never changes query/order, Space UUIDs or navigation.
@@ -16,6 +16,7 @@ extension PaletteDesign {
         case .monitorFocus: return CGSize(width: 560, height: 490)
         case .modernPrecision: return CGSize(width: 555, height: 490)
         case .pureMonochrome: return CGSize(width: 510, height: 455)
+        case .macOSNative: return CGSize(width: 535, height: 465)
         }
     }
 
@@ -25,6 +26,7 @@ extension PaletteDesign {
         case .studioCards: return 20
         case .modernPrecision: return 19
         case .pureMonochrome: return 22
+        case .macOSNative: return 20
         default: return 17
         }
     }
@@ -35,6 +37,7 @@ extension PaletteDesign {
         case .studioCards: return 14
         case .modernPrecision: return 13
         case .pureMonochrome: return 14
+        case .macOSNative: return 12
         default: return 11
         }
     }
@@ -48,6 +51,7 @@ extension PaletteDesign {
         case .nativeCalm: return 4
         case .modernPrecision: return 7
         case .pureMonochrome: return 3
+        case .macOSNative: return 2
         }
     }
 
@@ -58,6 +62,7 @@ extension PaletteDesign {
         case .monitorFocus: return 11
         case .modernPrecision: return 14
         case .pureMonochrome: return 12
+        case .macOSNative: return 11
         default: return 10
         }
     }
@@ -71,6 +76,7 @@ extension PaletteDesign {
         case .nativeCalm: return 9
         case .modernPrecision: return 12
         case .pureMonochrome: return 11
+        case .macOSNative: return 10
         }
     }
 
@@ -83,6 +89,7 @@ extension PaletteDesign {
         case .monitorFocus: return 11
         case .modernPrecision: return 14
         case .pureMonochrome: return 8
+        case .macOSNative: return 9
         }
     }
 
@@ -92,6 +99,7 @@ extension PaletteDesign {
         case .commandCompact: return 16
         case .modernPrecision: return 24
         case .pureMonochrome: return 20
+        case .macOSNative: return 20
         default: return 22
         }
     }
@@ -103,6 +111,7 @@ extension PaletteDesign {
         case .monitorFocus: return .system(size: 14, weight: .medium)
         case .modernPrecision: return .system(size: 14, weight: .medium)
         case .pureMonochrome: return .system(size: 14, weight: .regular)
+        case .macOSNative: return .system(size: 14, weight: .medium)
         default: return .system(size: 13, weight: .regular)
         }
     }
@@ -114,6 +123,7 @@ extension PaletteDesign {
         case .commandCompact: return .system(size: 13, weight: .bold)
         case .modernPrecision: return .system(size: 17, weight: .semibold)
         case .pureMonochrome: return .system(size: 16, weight: .semibold)
+        case .macOSNative: return .system(size: 16, weight: .semibold)
         default: return .system(size: 16, weight: .semibold)
         }
     }
@@ -135,6 +145,7 @@ extension PaletteDesign {
         case .frostedFocus: return 0.12
         case .modernPrecision: return 0.10
         case .pureMonochrome: return 0.07
+        case .macOSNative: return 0.08
         default: return 0.15
         }
     }
@@ -146,6 +157,7 @@ extension PaletteDesign {
         case .monitorFocus: return Color.secondary.opacity(0.045)
         case .modernPrecision: return Color.secondary.opacity(0.035)
         case .pureMonochrome: return .clear
+        case .macOSNative: return .clear
         default: return .clear
         }
     }
@@ -161,7 +173,9 @@ extension PaletteDesign {
     }
 
     var hasMaterialSurface: Bool { self == .frostedFocus }
-    var isRefined: Bool { self == .modernPrecision || self == .pureMonochrome }
+    var isRefined: Bool {
+        self == .modernPrecision || self == .pureMonochrome || self == .macOSNative
+    }
     var controlAccent: Color {
         self == .modernPrecision ? Color(red: 0.35, green: 0.40, blue: 0.68) : .accentColor
     }
@@ -173,16 +187,49 @@ extension PaletteDesign {
 }
 
 
-/// Replaces AppKit's thick blue text-field focus ring for the two refined
-/// designs with a thin neutral stroke and (Modern Precision only) a quiet
-/// indigo glow. Uses macOS semantic colors in both appearance modes.
+/// A native search-field silhouette without a heavy blue focus ring or stroke.
+/// The control uses a subtle semantic fill, with no card or border decoration.
+struct MacOSNativeSearchSurface: ViewModifier {
+    let isFocused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(
+                Color(nsColor: .controlBackgroundColor).opacity(isFocused ? 0.70 : 0.52),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+            .animation(.easeOut(duration: 0.16), value: isFocused)
+    }
+}
+
+/// A reserved inline space for editing actions. It never changes row width
+/// when the pointer enters; only visual opacity and hit testing change.
+struct PaletteHoverActions: ViewModifier {
+    let isVisible: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(isVisible ? 1 : 0)
+            .allowsHitTesting(isVisible)
+            .animation(.easeInOut(duration: 0.16), value: isVisible)
+    }
+}
+
+/// Replaces AppKit's thick blue text-field focus ring for refined
+/// designs. The macOS Native preset has a separate borderless treatment.
 struct RefinedSearchSurface: ViewModifier {
     let design: PaletteDesign
     let isFocused: Bool
 
     private var radius: CGFloat { design == .modernPrecision ? 12 : 8 }
 
+    @ViewBuilder
     func body(content: Content) -> some View {
+        if design == .macOSNative {
+            content.modifier(MacOSNativeSearchSurface(isFocused: isFocused))
+        } else {
         content
             .padding(.horizontal, 13)
             .padding(.vertical, design == .modernPrecision ? 12 : 11)
@@ -209,10 +256,11 @@ struct RefinedSearchSurface: ViewModifier {
                     ? Color.black.opacity(0.045) : .clear,
                     radius: 6, y: 2)
             .animation(.easeOut(duration: 0.18), value: isFocused)
+        }
     }
 }
 
-/// Identical switching/selection semantics for all seven themes. Only the
+/// Identical switching/selection semantics for all eight themes. Only the
 /// decorative surface changes. Refined themes animate hover and selection,
 /// while "current" remains distinguishable from keyboard focus.
 struct PaletteRowSurface: ViewModifier {
@@ -243,6 +291,10 @@ struct PaletteRowSurface: ViewModifier {
         case .pureMonochrome:
             let opacity = isSelected ? 0.105 : (isHovered ? 0.055 : (isCurrent ? 0.035 : 0))
             stops = [Color.secondary.opacity(opacity), Color.secondary.opacity(opacity)]
+        case .macOSNative:
+            // No resting cards: only an understated selection/hover affordance.
+            let opacity = isSelected ? 0.09 : (isHovered ? 0.04 : 0)
+            stops = [Color.primary.opacity(opacity), Color.primary.opacity(opacity)]
         default:
             let color = isSelected ? Color.accentColor.opacity(design.selectedOpacity)
                 : (isCurrent ? Color.secondary.opacity(0.055) : design.idleColor)
@@ -257,7 +309,7 @@ struct PaletteRowSurface: ViewModifier {
             if isCurrent { return Color.secondary.opacity(0.22) }
             return Color.secondary.opacity(isHovered ? 0.16 : 0.075)
         }
-        if design == .pureMonochrome { return .clear }
+        if design == .pureMonochrome || design == .macOSNative { return .clear }
         return isCurrent ? Color.secondary.opacity(0.40) : .clear
     }
 
@@ -274,7 +326,7 @@ struct PaletteRowSurface: ViewModifier {
                     .allowsHitTesting(false)
             }
             .overlay(alignment: .leading) {
-                if design == .pureMonochrome && isSelected {
+                if (design == .pureMonochrome || design == .macOSNative) && isSelected {
                     Capsule()
                         .fill(design.controlAccent)
                         .frame(width: 2, height: 21)
