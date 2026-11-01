@@ -10,7 +10,38 @@ enum DesktopNumberExperimentMode: String {
     case sequential
 }
 
+enum ArrowBurstExperimentMode: String {
+    case off
+    case ms100
+    case ms50
+
+    var intervalMS: Int {
+        switch self {
+        case .off, .ms100: return 100
+        case .ms50: return 50
+        }
+    }
+}
+
 enum SwitchModeSettings {
+    static let arrowBurstModeKey = "oniwa.arrowBurstExperimentMode"
+
+    static var arrowBurstExperimentMode: ArrowBurstExperimentMode {
+        get {
+            ArrowBurstExperimentMode(
+                rawValue: UserDefaults.standard.string(forKey: arrowBurstModeKey) ?? ""
+            ) ?? .off
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: arrowBurstModeKey)
+            if newValue != .off {
+                UserDefaults.standard.set(false, forKey: globalInstantExperimentKey)
+                UserDefaults.standard.set(false, forKey: globalMCOneSessionExperimentKey)
+                UserDefaults.standard.set(DesktopNumberExperimentMode.off.rawValue,
+                                          forKey: desktopNumberModeKey)
+            }
+        }
+    }
     static let desktopNumberModeKey = "oniwa.desktopNumberExperimentMode"
 
     static var desktopNumberExperimentMode: DesktopNumberExperimentMode {
@@ -24,6 +55,8 @@ enum SwitchModeSettings {
             if newValue != .off {
                 UserDefaults.standard.set(false, forKey: globalInstantExperimentKey)
                 UserDefaults.standard.set(false, forKey: globalMCOneSessionExperimentKey)
+                UserDefaults.standard.set(ArrowBurstExperimentMode.off.rawValue,
+                                          forKey: arrowBurstModeKey)
             }
         }
     }
@@ -48,6 +81,8 @@ enum SwitchModeSettings {
                 UserDefaults.standard.set(false, forKey: globalMCOneSessionExperimentKey)
                 UserDefaults.standard.set(DesktopNumberExperimentMode.off.rawValue,
                                           forKey: desktopNumberModeKey)
+                UserDefaults.standard.set(ArrowBurstExperimentMode.off.rawValue,
+                                          forKey: arrowBurstModeKey)
             }
         }
     }
@@ -60,6 +95,8 @@ enum SwitchModeSettings {
                 UserDefaults.standard.set(false, forKey: globalInstantExperimentKey)
                 UserDefaults.standard.set(DesktopNumberExperimentMode.off.rawValue,
                                           forKey: desktopNumberModeKey)
+                UserDefaults.standard.set(ArrowBurstExperimentMode.off.rawValue,
+                                          forKey: arrowBurstModeKey)
             }
         }
     }
@@ -74,6 +111,7 @@ enum SwitchModeSettings {
     static var anyGlobalExperimentEnabled: Bool {
         globalInstantExperimentEnabled || globalMCOneSessionExperimentEnabled
             || desktopNumberExperimentMode != .off
+            || arrowBurstExperimentMode != .off
     }
 
     static var single: SingleSpaceSwitchMode {
