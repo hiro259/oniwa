@@ -1254,6 +1254,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var missionControlResetWaitItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
     private var paletteDesignItems: [PaletteDesign: NSMenuItem] = [:]
+    private var languageItems: [AppLanguage: NSMenuItem] = [:]
+
+    private var language: AppLanguage { AppLanguage.selected() }
+    private func t(_ ja: String, _ en: String) -> String { language.text(ja, en) }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Adopt independent, exclusive single/pair selections once.
@@ -1276,12 +1280,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.shortcutDescription = shortcut.current.title
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "庭"
+        statusItem = item
+        rebuildStatusMenu()
+        state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
+        state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
+    }
+
+    /// Rebuild only the status menu; do not re-register shortcuts or observers.
+    /// This ensures live language changes also update all menu titles.
+    private func rebuildStatusMenu() {
+        guard let item = statusItem, let shortcut else { return }
+        shortcutItems.removeAll()
+        paletteDesignItems.removeAll()
+        languageItems.removeAll()
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Search Spaces…", action: #selector(openPanel), keyEquivalent: ""))
-        let shortcutRoot = NSMenuItem(title: "ショートカット", action: nil, keyEquivalent: "")
-        let shortcutMenu = NSMenu(title: "ショートカット")
+        menu.addItem(NSMenuItem(title: t("Spaceを検索…", "Search Spaces…"), action: #selector(openPanel), keyEquivalent: ""))
+        let shortcutRoot = NSMenuItem(title: t("ショートカット", "Shortcuts"), action: nil, keyEquivalent: "")
+        let shortcutMenu = NSMenu(title: t("ショートカット", "Shortcuts"))
         for preset in GlobalShortcut.Preset.allCases {
-            let option = NSMenuItem(title: preset == .optionSpace ? "⌥ Space（おすすめ）" : preset.title,
+            let option = NSMenuItem(title: preset == .optionSpace ? t("⌥ Space（おすすめ）", "⌥ Space (recommended)") : preset.title,
                                     action: #selector(changeShortcut(_:)),
                                     keyEquivalent: "")
             option.target = self
@@ -1291,7 +1308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shortcutMenu.addItem(option)
         }
         shortcutMenu.addItem(NSMenuItem.separator())
-        let recorderItem = NSMenuItem(title: "ショートカットを記録…",
+        let recorderItem = NSMenuItem(title: t("ショートカットを記録…", "Record shortcut…"),
                                       action: #selector(recordShortcut),
                                       keyEquivalent: "")
         recorderItem.target = self
@@ -1302,16 +1319,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Keep the old switching UI in source for OS regression research,
         // but do not offer its experimental controls to ordinary users.
         let standardSwitch = NSMenuItem(
-            title: "切り替え方式：⌃←/→ 高速連打（50ms・標準）",
+            title: t("切り替え方式：⌃←/→ 高速連打（50ms・標準）", "Switching: ⌃←/→ (50 ms, default)"),
             action: nil, keyEquivalent: "")
         standardSwitch.isEnabled = false
-        standardSwitch.toolTip = "Mission Controlを表示せず、標準ショートカットを50ms間隔で連続送信。"
-            + "目的Spaceへの到達と全モニターの安定性を確認します。"
+        standardSwitch.toolTip = t("標準ショートカットでSpaceを切り替えます。", "Switch Spaces using the standard keyboard shortcuts.")
         menu.addItem(standardSwitch)
 
         let designRoot = NSMenuItem(
-            title: "検索パレットのデザイン", action: nil, keyEquivalent: "")
-        let designMenu = NSMenu(title: "検索パレットのデザイン")
+            title: t("検索パレットのデザイン", "Palette design"), action: nil, keyEquivalent: "")
+        let designMenu = NSMenu(title: t("検索パレットのデザイン", "Palette design"))
         let activeDesign = PaletteDesign.selected()
         for option in PaletteDesign.allCases {
             let entry = NSMenuItem(
@@ -1327,6 +1343,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         designRoot.submenu = designMenu
         menu.addItem(designRoot)
+
+        let languageRoot = NSMenuItem(title: t("言語", "Language"), action: nil, keyEquivalent: "")
+        let languageMenu = NSMenu(title: t("言語", "Language"))
+        for option in AppLanguage.allCases {
+            let entry = NSMenuItem(title: option.title,
+                                   action: #selector(selectLanguage(_:)),
+                                   keyEquivalent: "")
+            entry.representedObject = option.rawValue
+            entry.state = option == language ? .on : .off
+            entry.target = self
+            languageItems[option] = entry
+            languageMenu.addItem(entry)
+        }
+        languageRoot.submenu = languageMenu
+        menu.addItem(languageRoot)
 
         #if ONIWA_LEGACY_SWITCHING_UI
         // Archived experiment UI: opt in at build time only.
@@ -1503,23 +1534,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         menu.addItem(NSMenuItem.separator())
-        let diagnosis = NSMenuItem(title: "ショートカット診断…",
+        let diagnosis = NSMenuItem(title: t("ショートカット診断…", "Shortcut diagnostics…"),
                                    action: #selector(showShortcutDiagnosis),
                                    keyEquivalent: "")
         diagnosis.target = self
         menu.addItem(diagnosis)
-        let switchLog = NSMenuItem(title: "切り替え診断ログを開く…",
+        let switchLog = NSMenuItem(title: t("切り替え診断ログを開く…", "Open switching log…"),
                                    action: #selector(openSwitchLog),
                                    keyEquivalent: "")
         switchLog.target = self
         menu.addItem(switchLog)
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit ONIWA", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: t("ONIWAを終了", "Quit ONIWA"), action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items { item.target = self }
         item.menu = menu
-        statusItem = item
-        state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
-        state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
+    }
+
+    @objc private func selectLanguage(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let choice = AppLanguage(rawValue: raw) else { return }
+        choice.persist()
+        // @AppStorage refreshes SearchView and any open sheet immediately.
+        // Rebuild after the old menu closes to avoid mutating the tracked NSMenu.
+        DispatchQueue.main.async { [weak self] in self?.rebuildStatusMenu() }
     }
 
     private func singleModeSummary(_ mode: SingleSpaceSwitchMode) -> String {
