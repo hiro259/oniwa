@@ -603,9 +603,9 @@ private struct LiveSpaceReorderDelegate: DropDelegate {
 
 struct SearchView: View {
     @ObservedObject var state: SearchState
-    @AppStorage(PaletteDesign.settingsKey) private var paletteRaw = PaletteDesign.nativeCalm.rawValue
+    @AppStorage(PaletteDesign.settingsKey) private var paletteRaw = PaletteDesign.macOSNative.rawValue
     @AppStorage(AppLanguage.settingsKey) private var languageRaw = AppLanguage.japanese.rawValue
-    private var design: PaletteDesign { PaletteDesign(rawValue: paletteRaw) ?? .nativeCalm }
+    private var design: PaletteDesign { PaletteDesign.active(rawValue: paletteRaw) }
     private var language: AppLanguage { AppLanguage(rawValue: languageRaw) ?? .japanese }
     private func t(_ ja: String, _ en: String) -> String { language.text(ja, en) }
     @FocusState private var isSearchFocused: Bool
@@ -1377,8 +1377,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let designRoot = NSMenuItem(
             title: t("検索パレットのデザイン", "Palette design"), action: nil, keyEquivalent: "")
         let designMenu = NSMenu(title: t("検索パレットのデザイン", "Palette design"))
-        let activeDesign = PaletteDesign.selected()
-        for option in PaletteDesign.allCases {
+        let activeDesign = PaletteDesign.active()
+        for option in PaletteDesign.visiblePresets {
             let entry = NSMenuItem(
                 title: option.title,
                 action: #selector(selectPaletteDesign(_:)),
@@ -1391,7 +1391,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             designMenu.addItem(entry)
         }
         designRoot.submenu = designMenu
-        menu.addItem(designRoot)
+        // With a single visible design there is nothing to choose. The
+        // submenu returns automatically if additional presets are restored.
+        if PaletteDesign.visiblePresets.count > 1 {
+            menu.addItem(designRoot)
+        }
 
         // This is a macOS Native-only appearance setting. The embedded
         // SwiftUI slider observes @AppStorage and updates the open panel live.
@@ -2009,7 +2013,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state.refresh()
         }
         if panel == nil {
-            let preferred = PaletteDesign.selected().panelSize
+            let preferred = PaletteDesign.active().panelSize
             let window = SearchPanel(contentRect: NSRect(
                 x: 0, y: 0, width: preferred.width, height: preferred.height),
                                      styleMask: [.titled, .fullSizeContentView],
@@ -2020,7 +2024,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.contentView = NSHostingView(rootView: SearchView(state: state))
             panel = window
-            applyPaletteWindowStyle(PaletteDesign.selected())
+            applyPaletteWindowStyle(PaletteDesign.active())
         }
         panel?.center()
         NSApp.activate(ignoringOtherApps: true)
