@@ -93,7 +93,7 @@ final class SearchState: ObservableObject {
 
     func monitorName(_ space: SpaceEntry) -> String {
         let number = (groups.firstIndex(where: { $0.id == space.displayID }) ?? 0) + 1
-        return "モニター\(number)（\(space.displayName)）"
+        return AppLanguage.ui("モニター\(number)（\(space.displayName)）", "Display \(number) (\(space.displayName))")
     }
 
     func resolvedSpaces(for pair: SpacePair) -> (SpaceEntry, SpaceEntry)? {
@@ -260,7 +260,7 @@ final class SearchState: ObservableObject {
         guard let first = choices.first,
               let second = choices.first(where: { $0.displayID != first.displayID })
         else {
-            errorMessage = "セットには別々の2つのモニターと、UUIDのあるSpaceが必要です。"
+            errorMessage = AppLanguage.ui("別々の2画面に、登録できるSpaceが必要です。", "Two displays with available Spaces are required.")
             return
         }
         pairNameDraft = ""
@@ -303,7 +303,7 @@ final class SearchState: ObservableObject {
                   in: SpaceReader.shared.displays(includeAppNames: false)
                       .flatMap(\.spaces).map(\.identity))
         else {
-            errorMessage = "セットを保存できません。対象のSpaceとモニターを確認してください。"
+            errorMessage = AppLanguage.ui("セットを保存できません。Spaceを選び直してください。", "Couldn't save the set. Choose the Spaces again.")
             pairEditing = false
             return
         }
@@ -339,7 +339,7 @@ final class SearchState: ObservableObject {
             + "\(String(pair.second.uuid.prefix(8)))"
         )
         guard resolvedSpaces(for: pair) != nil else {
-            errorMessage = "セットのSpaceが見つかりません。鉛筆ボタンから再設定してください。"
+            errorMessage = AppLanguage.ui("セットのSpaceが見つかりません。セットを編集してください。", "Set Spaces weren't found. Edit the set.")
             return
         }
         isSwitching = true
@@ -363,8 +363,8 @@ final class SearchState: ObservableObject {
         observeCurrentSpaces(groups)
         if !groups.isEmpty { labels.reconcile(groups.flatMap(\.spaces).map(\.identity)) }
         errorMessage = SpaceReader.shared.available
-            ? (groups.isEmpty ? "No Spaces found. This macOS version may be unsupported." : nil)
-            : "Could not load SkyLight. This macOS version may be unsupported."
+            ? (groups.isEmpty ? AppLanguage.ui("Spaceが見つかりません。このmacOSには未対応の可能性があります。", "No Spaces found. This macOS version may be unsupported.") : nil)
+            : AppLanguage.ui("Space情報を取得できません。このmacOSには未対応の可能性があります。", "Couldn't read Spaces. This macOS version may be unsupported.")
         if !allResultIDs.contains(selectedID ?? "") {
             selectedID = allResultIDs.first
         }
@@ -393,7 +393,7 @@ final class SearchState: ObservableObject {
             activate(space)
         } else {
             SpaceSwitchDiagnostics.record("ui-activate aborted: stale selected result")
-            errorMessage = "選択したSpaceが検索結果から消えました。候補を選び直してください。"
+            errorMessage = AppLanguage.ui("選択したSpaceが見つかりません。選び直してください。", "The selected Space is no longer available. Select it again.")
             selectedIDReset()
         }
     }
@@ -475,7 +475,7 @@ final class SearchState: ObservableObject {
         commitPendingKeyword()
         guard let identity = liveEditingIdentity() else {
             cancelEdit()
-            errorMessage = "編集中のSpaceが見つかりません。検索一覧を更新してください。"
+            errorMessage = AppLanguage.ui("Spaceが見つかりません。一覧を更新してください。", "Space not found. Refresh the list.")
             return
         }
         labels.update(identity, name: nameDraft, tags: tagsDraft)
@@ -531,6 +531,13 @@ final class SearchState: ObservableObject {
 private struct SpaceTag: View {
     let title: String
     let isAutomatic: Bool
+    let design: PaletteDesign
+
+    init(title: String, isAutomatic: Bool, design: PaletteDesign = .nativeCalm) {
+        self.title = title
+        self.isAutomatic = isAutomatic
+        self.design = design
+    }
 
     var body: some View {
         HStack(spacing: 2) {
@@ -543,10 +550,11 @@ private struct SpaceTag: View {
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 7)
-        .padding(.vertical, 3)
-        .background(Color.secondary.opacity(isAutomatic ? 0.06 : 0.11), in: Capsule())
-        .help(isAutomatic ? "このSpace内のアプリから自動取得（保存されません）" : "登録した検索タグ")
+        .padding(.horizontal, design == .pureMonochrome || design == .macOSNative ? 2 : 7)
+        .padding(.vertical, design == .pureMonochrome || design == .macOSNative ? 1 : 3)
+        .background(Color.secondary.opacity(design == .pureMonochrome || design == .macOSNative
+            ? 0 : (isAutomatic ? 0.06 : 0.11)), in: Capsule())
+        .help(isAutomatic ? AppLanguage.ui("アプリから自動取得", "Detected app (automatic)") : AppLanguage.ui("登録した検索タグ", "Saved search tag"))
     }
 }
 
@@ -595,41 +603,114 @@ private struct LiveSpaceReorderDelegate: DropDelegate {
 
 struct SearchView: View {
     @ObservedObject var state: SearchState
+    @AppStorage(PaletteDesign.settingsKey) private var paletteRaw = PaletteDesign.macOSNative.rawValue
+    @AppStorage(AppLanguage.settingsKey) private var languageRaw = AppLanguage.japanese.rawValue
+    private var design: PaletteDesign { PaletteDesign.active(rawValue: paletteRaw) }
+    private var language: AppLanguage { AppLanguage(rawValue: languageRaw) ?? .japanese }
+    private func t(_ ja: String, _ en: String) -> String { language.text(ja, en) }
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isTagInputFocused: Bool
+    @FocusState private var isNameInputFocused: Bool
+    @FocusState private var isPairNameInputFocused: Bool
     @State private var draggingOrderKey: String?
+    @State private var hoveredItemID: String?
 
+    /// macOS Native keeps the same row controls visible for keyboard selection
+    /// and pointer hover, including when they refer to different rows.
+    private func showsRowControls(for id: String) -> Bool {
+        design != .macOSNative || state.selectedID == id || hoveredItemID == id
+    }
+
+    private var sortTitle: String {
+        switch state.sortMode {
+        case .recent: return t("最近使った順", "Recently used")
+        case .original: return t("元の並び", "Original order")
+        case .name: return t("名前順", "Name")
+        case .custom: return t("手動で並べ替え", "Custom order")
+        }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("ONIWA").font(.headline)
-                Spacer()
-                Text(state.shortcutDescription).foregroundStyle(.secondary).font(.caption)
-            }
-            TextField("Space・セット・タグを検索…", text: $state.query)
-                .textFieldStyle(.roundedBorder)
-                .focused($isSearchFocused)
-                .onSubmit { state.activateSelected() }
-            HStack(spacing: 6) {
-                Text("並び替え")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("並び替え", selection: Binding(
-                    get: { state.sortMode },
-                    set: { state.changeSortMode($0) }
-                )) {
-                    Text("最近使った順").tag(SpaceListSortMode.recent)
-                    Text("元の並び").tag(SpaceListSortMode.original)
-                    Text("名前順").tag(SpaceListSortMode.name)
-                    Text("自由に並べる").tag(SpaceListSortMode.custom)
+        VStack(alignment: .leading, spacing: design.stackSpacing) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ONIWA").font(design.headingFont)
+                    if design.showsSubtitle {
+                        Text(design.detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .frame(width: 170)
+                Spacer(minLength: 8)
+                Text(state.shortcutDescription)
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
+            }
+            if design.isRefined {
+                HStack(spacing: 11) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    TextField(t("Spaceやセットを検索", "Search Spaces or sets"), text: $state.query)
+                        .textFieldStyle(.plain)
+                        .font(design.searchFont)
+                        .focused($isSearchFocused)
+                        .onSubmit { state.activateSelected() }
+                        .accessibilityLabel(t("Spaceやセットを検索", "Search Spaces or sets"))
+                }
+                .modifier(RefinedSearchSurface(design: design, isFocused: isSearchFocused))
+            } else {
+                TextField(t("Spaceやセットを検索", "Search Spaces or sets"), text: $state.query)
+                    .textFieldStyle(.roundedBorder)
+                    .font(design.searchFont)
+                    .controlSize(design == .commandCompact ? .small : .regular)
+                    .padding(.vertical, design.hasMaterialSurface ? 4 : 0)
+                    .padding(.horizontal, design.hasMaterialSurface ? 5 : 0)
+                    .background {
+                        if design.hasMaterialSurface {
+                            RoundedRectangle(cornerRadius: 11).fill(.regularMaterial)
+                        }
+                    }
+                    .focused($isSearchFocused)
+                    .onSubmit { state.activateSelected() }
+            }
+            HStack(spacing: 6) {
+                if design == .macOSNative {
+                    Menu {
+                        Button(t("最近使った順", "Recently used")) { state.changeSortMode(.recent) }
+                        Button(t("元の並び", "Original order")) { state.changeSortMode(.original) }
+                        Button(t("名前順", "Name")) { state.changeSortMode(.name) }
+                        Button(t("手動で並べ替え", "Custom order")) { state.changeSortMode(.custom) }
+                    } label: {
+                        Label(sortTitle, systemImage: "arrow.up.arrow.down")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .accessibilityLabel(t("並び替え: ", "Sort: ") + sortTitle)
+                } else {
+                    Text(t("並び替え", "Sort"))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker(t("並び替え", "Sort"), selection: Binding(
+                        get: { state.sortMode },
+                        set: { state.changeSortMode($0) }
+                    )) {
+                        Text(t("最近使った順", "Recently used")).tag(SpaceListSortMode.recent)
+                        Text(t("元の並び", "Original order")).tag(SpaceListSortMode.original)
+                        Text(t("名前順", "Name")).tag(SpaceListSortMode.name)
+                        Text(t("手動で並べ替え", "Custom order")).tag(SpaceListSortMode.custom)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 170)
+                }
                 Spacer()
-                if state.canReorderByDrag {
-                    Text("≡ をドラッグすると順番が入れ替わります")
+                if state.canReorderByDrag && design != .macOSNative {
+                    Text(t("つまみをドラッグして並べ替え", "Drag the handle to reorder"))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -640,29 +721,41 @@ struct SearchView: View {
             }
             ScrollViewReader { scroll in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 3) {
+                    LazyVStack(alignment: .leading, spacing: design.rowSpacing) {
                     ForEach(state.orderedItems) { item in
                         switch item {
                         case .pair(let pair):
                         let destination = state.resolvedSpaces(for: pair)
                         let isCurrent = destination.map { $0.0.isCurrent && $0.1.isCurrent } ?? false
-                        HStack(spacing: 9) {
+                        HStack(spacing: design == .studioCards ? 13 : 9) {
                             Image(systemName: "square.on.square")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(design.isRefined && state.pairResultID(pair) == state.selectedID
+                                    ? design.controlAccent : Color.secondary)
+                                .frame(width: design.leadingIconWidth)
+                                .padding(.vertical, design == .studioCards ? 8 : 0)
+                                .background {
+                                    if design == .studioCards {
+                                        RoundedRectangle(cornerRadius: 9)
+                                            .fill(Color.accentColor.opacity(0.12))
+                                    }
+                                }
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack {
                                     Text(pair.name)
+                                        .font(design.titleFont)
                                         .fontWeight(state.pairResultID(pair) == state.selectedID
-                                            || isCurrent ? .semibold : .regular)
+                                            || isCurrent ? .semibold : (design == .modernPrecision
+                                                ? .medium : .regular))
                                         .lineLimit(1)
-                                    Text("セット")
+                                    Text(t("セット", "Set"))
                                         .font(.caption2)
                                         .foregroundStyle(.secondary)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
-                                        .background(Color.secondary.opacity(0.10), in: Capsule())
+                                        .background(Color.secondary.opacity(design == .pureMonochrome || design == .macOSNative
+                                            ? 0 : 0.10), in: Capsule())
                                     if isCurrent {
-                                        Label("current", systemImage: "checkmark.circle.fill")
+                                        Label(t("表示中", "current"), systemImage: "checkmark.circle.fill")
                                             .font(.caption2)
                                             .foregroundStyle(.secondary)
                                     }
@@ -672,8 +765,13 @@ struct SearchView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
+                                    if design.showsMonitorBadge {
+                                        Label(t("2画面セット", "Two-display set"), systemImage: "display.2")
+                                            .font(.caption2.weight(.medium))
+                                            .foregroundStyle(.secondary)
+                                    }
                                 } else {
-                                    Label("Spaceが見つかりません · セットを再設定してください",
+                                    Label(t("Spaceが見つかりません。セットを編集してください", "Spaces unavailable. Edit this set."),
                                           systemImage: "exclamationmark.triangle")
                                         .font(.caption)
                                         .foregroundStyle(.orange)
@@ -684,49 +782,71 @@ struct SearchView: View {
                             if state.canReorderByDrag {
                                 Image(systemName: "line.3.horizontal")
                                     .foregroundStyle(.secondary)
-                                    .help("ドラッグして表示順を変更")
+                                    .help(t("ドラッグして並べ替え", "Drag to reorder"))
                                     .onDrag {
                                         draggingOrderKey = "pair:\(pair.id.uuidString)"
                                         return NSItemProvider(
                                             object: "pair:\(pair.id.uuidString)" as NSString)
                                     }
+                                    .modifier(PaletteHoverActions(
+                                        isVisible: showsRowControls(
+                                            for: state.pairResultID(pair))))
                             }
-                            Button {
-                                state.togglePin(pair)
-                            } label: {
-                                Image(systemName: state.isPinned(pair) ? "pin.fill" : "pin")
-                                    .foregroundStyle(state.isPinned(pair)
-                                        ? Color.accentColor : Color.secondary)
+                            HStack(spacing: 9) {
+                                Button {
+                                    state.togglePin(pair)
+                                } label: {
+                                    Image(systemName: state.isPinned(pair) ? "pin.fill" : "pin")
+                                        .foregroundStyle(design == .macOSNative
+                                            ? Color.secondary.opacity(0.78)
+                                            : (state.isPinned(pair)
+                                                ? design.controlAccent : Color.secondary))
+                                }
+                                .buttonStyle(.borderless)
+                                .help(state.isPinned(pair) ? t("ピン留めを解除", "Unpin") : t("先頭にピン留め", "Pin to top"))
+                                .accessibilityLabel(state.isPinned(pair)
+                                    ? t("セットのピン留めを解除", "Unpin set") : t("セットをピン留め", "Pin set"))
+                                Button {
+                                    state.beginPairEdit(pair)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                }
+                                .buttonStyle(.borderless)
+                                .help(t("セットを編集", "Edit set"))
                             }
-                            .buttonStyle(.borderless)
-                            .help(state.isPinned(pair) ? "ピン留めを解除" : "一覧の先頭にピン留め")
-                            .accessibilityLabel(state.isPinned(pair)
-                                ? "セットのピン留めを解除" : "セットをピン留め")
-                            Button {
-                                state.beginPairEdit(pair)
-                            } label: {
-                                Image(systemName: "pencil")
-                            }
-                            .buttonStyle(.borderless)
-                            .help("セットを編集または削除")
+                            .modifier(PaletteHoverActions(
+                                isVisible: showsRowControls(
+                                    for: state.pairResultID(pair))))
                         }
-                        .padding(8)
-                        .background(state.pairResultID(pair) == state.selectedID
-                            ? Color.accentColor.opacity(0.16)
-                            : (isCurrent ? Color.secondary.opacity(0.04) : Color.clear))
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 7)
-                                .strokeBorder(isCurrent ? Color.secondary.opacity(0.38) : Color.clear,
-                                              lineWidth: 1)
-                                .allowsHitTesting(false)
-                        }
+                        .padding(.horizontal, design.rowHorizontalPadding)
+                        .padding(.vertical, design.rowVerticalPadding)
+                        .modifier(PaletteRowSurface(
+                            design: design,
+                            isSelected: state.pairResultID(pair) == state.selectedID,
+                            isCurrent: isCurrent,
+                            isHovered: hoveredItemID == state.pairResultID(pair)))
                         .contentShape(Rectangle())
                         .onTapGesture {
                             if state.selectedID == state.pairResultID(pair) {
                                 state.activatePair(pair)
                             } else {
                                 state.selectedID = state.pairResultID(pair)
+                            }
+                        }
+                        .onHover { hovering in
+                            guard design.isRefined else { return }
+                            if hovering {
+                                hoveredItemID = state.pairResultID(pair)
+                            } else if hoveredItemID == state.pairResultID(pair) {
+                                hoveredItemID = nil
+                            }
+                        }
+                        .contextMenu {
+                            if design == .macOSNative {
+                                Button(state.isPinned(pair) ? t("ピン留めを解除", "Unpin") : "ピン留め") {
+                                    state.togglePin(pair)
+                                }
+                                Button("セットを編集") { state.beginPairEdit(pair) }
                             }
                         }
                         .id(state.pairResultID(pair))
@@ -737,16 +857,27 @@ struct SearchView: View {
                                 state: state, draggingKey: $draggingOrderKey)
                         )
                         case .space(let space):
-                        HStack(spacing: 9) {
+                        HStack(spacing: design == .studioCards ? 13 : 9) {
                             Image(systemName: space.kind == 4 ? "arrow.up.left.and.arrow.down.right" : "display")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(design.isRefined && space.id == state.selectedID
+                                    ? design.controlAccent : Color.secondary)
+                                .frame(width: design.leadingIconWidth)
+                                .padding(.vertical, design == .studioCards ? 8 : 0)
+                                .background {
+                                    if design == .studioCards {
+                                        RoundedRectangle(cornerRadius: 9)
+                                            .fill(Color.accentColor.opacity(0.12))
+                                    }
+                                }
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack {
                                     Text(state.labels.label(for: space.identity)?.name.isEmpty == false
                                          ? (state.labels.label(for: space.identity)?.name ?? space.defaultName)
                                          : space.defaultName)
+                                        .font(design.titleFont)
                                         .fontWeight(space.id == state.selectedID || space.isCurrent
-                                            ? .semibold : .regular)
+                                            ? .semibold : (design == .modernPrecision
+                                                ? .medium : .regular))
                                         .lineLimit(1)
                                     if space.isCurrent {
                                         Label("current", systemImage: "checkmark.circle.fill")
@@ -754,14 +885,25 @@ struct SearchView: View {
                                             .foregroundStyle(.secondary)
                                             .padding(.horizontal, 7)
                                             .padding(.vertical, 3)
-                                            .background(Color.secondary.opacity(0.09), in: Capsule())
+                                            .background(Color.secondary.opacity(design == .pureMonochrome || design == .macOSNative
+                                                ? 0 : 0.09), in: Capsule())
                                             .fixedSize()
-                                            .help("このモニターで現在表示されているSpace")
+                                            .help(t("この画面に表示中", "Visible on this display"))
                                     }
                                 }
-                                Text("\(space.displayName) · Space \(space.index + 1)")
-                                    .font(.caption).foregroundStyle(.secondary)
-                                    .lineLimit(1)
+                                HStack(spacing: 6) {
+                                    if design.showsMonitorBadge {
+                                        Text("M\((state.groups.firstIndex(where: { $0.id == space.displayID }) ?? 0) + 1)")
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(Color.secondary.opacity(0.12), in: Capsule())
+                                    }
+                                    Text("\(space.displayName) · Space \(space.index + 1)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
                                 // Saved search keywords and current apps appear
                                 // as tags, but only the manual tags are persisted.
                                 let manualTags = state.labels.label(for: space.identity)?.searchTags ?? []
@@ -770,10 +912,10 @@ struct SearchView: View {
                                 if !manualTags.isEmpty || !appTags.isEmpty {
                                     HStack(spacing: 4) {
                                         ForEach(Array(manualTags.prefix(2)), id: \.self) { tag in
-                                            SpaceTag(title: tag, isAutomatic: false)
+                                            SpaceTag(title: tag, isAutomatic: false, design: design)
                                         }
                                         ForEach(Array(appTags.prefix(2)), id: \.self) { app in
-                                            SpaceTag(title: app, isAutomatic: true)
+                                            SpaceTag(title: app, isAutomatic: true, design: design)
                                         }
                                         let extra = max(0, manualTags.count - 2)
                                             + max(0, appTags.count - 2)
@@ -790,52 +932,71 @@ struct SearchView: View {
                                let key = space.identity.persistentKey {
                                 Image(systemName: "line.3.horizontal")
                                     .foregroundStyle(.secondary)
-                                    .help("ドラッグして表示順を変更")
+                                    .help(t("ドラッグして並べ替え", "Drag to reorder"))
                                     .onDrag {
                                         draggingOrderKey = key
                                         return NSItemProvider(object: key as NSString)
                                     }
+                                    .modifier(PaletteHoverActions(
+                                        isVisible: showsRowControls(for: space.id)))
                             }
-                            Button {
-                                state.togglePin(space)
-                            } label: {
-                                Image(systemName: state.isPinned(space) ? "pin.fill" : "pin")
-                                    .foregroundStyle(state.isPinned(space)
-                                        ? Color.accentColor : Color.secondary)
+                            HStack(spacing: 9) {
+                                Button {
+                                    state.togglePin(space)
+                                } label: {
+                                    Image(systemName: state.isPinned(space) ? "pin.fill" : "pin")
+                                        .foregroundStyle(design == .macOSNative
+                                            ? Color.secondary.opacity(0.78)
+                                            : (state.isPinned(space)
+                                                ? design.controlAccent : Color.secondary))
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(space.identity.persistentKey == nil)
+                                .help(space.identity.persistentKey == nil
+                                    ? t("このSpaceはピン留めを保存できません", "Pinning cannot be saved for this Space")
+                                    : (state.isPinned(space) ? t("ピン留めを解除", "Unpin") : t("先頭にピン留め", "Pin to top")))
+                                .accessibilityLabel(state.isPinned(space)
+                                    ? t("Spaceのピン留めを解除", "Unpin Space") : t("Spaceをピン留め", "Pin Space"))
+                                Button {
+                                    state.beginEdit(space)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                }
+                                .buttonStyle(.borderless)
+                                .help(t("名前とタグを編集", "Edit name and tags"))
                             }
-                            .buttonStyle(.borderless)
-                            .disabled(space.identity.persistentKey == nil)
-                            .help(space.identity.persistentKey == nil
-                                ? "UUIDのないSpaceは再起動後のピン留めを保存できません"
-                                : (state.isPinned(space) ? "ピン留めを解除" : "一覧の先頭にピン留め"))
-                            .accessibilityLabel(state.isPinned(space)
-                                ? "Spaceのピン留めを解除" : "Spaceをピン留め")
-                            Button {
-                                state.beginEdit(space)
-                            } label: {
-                                Image(systemName: "pencil")
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Rename or add aliases")
+                            .modifier(PaletteHoverActions(
+                                isVisible: showsRowControls(for: space.id)))
                         }
-                        .padding(8)
-                        // The accent background indicates keyboard selection.
-                        // A subtle neutral border and "current" badge indicate the
-                        // visible Space, even when another result is selected.
-                        .background(space.id == state.selectedID
-                            ? Color.accentColor.opacity(0.16)
-                            : (space.isCurrent ? Color.secondary.opacity(0.04) : Color.clear))
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 7)
-                                .strokeBorder(space.isCurrent ? Color.secondary.opacity(0.38) : Color.clear,
-                                              lineWidth: 1)
-                                .allowsHitTesting(false)
-                        }
+                        .padding(.horizontal, design.rowHorizontalPadding)
+                        .padding(.vertical, design.rowVerticalPadding)
+                        // Neutral current state differs from keyboard selection.
+                        .modifier(PaletteRowSurface(
+                            design: design,
+                            isSelected: space.id == state.selectedID,
+                            isCurrent: space.isCurrent,
+                            isHovered: hoveredItemID == space.id))
                         .contentShape(Rectangle())
                         .onTapGesture {
                             if state.selectedID == space.id { state.activate(space) }
                             else { state.selectedID = space.id }
+                        }
+                        .onHover { hovering in
+                            guard design.isRefined else { return }
+                            if hovering {
+                                hoveredItemID = space.id
+                            } else if hoveredItemID == space.id {
+                                hoveredItemID = nil
+                            }
+                        }
+                        .contextMenu {
+                            if design == .macOSNative {
+                                Button(state.isPinned(space) ? t("ピン留めを解除", "Unpin") : "ピン留め") {
+                                    state.togglePin(space)
+                                }
+                                .disabled(space.identity.persistentKey == nil)
+                                Button(t("名前とタグを編集", "Edit name and tags")) { state.beginEdit(space) }
+                            }
                         }
                         .id(space.id)
                         .onDrop(
@@ -857,22 +1018,37 @@ struct SearchView: View {
                 }
             }
             HStack {
-                Text("↑↓ 選択   ↵ 切り替え   Esc 閉じる")
+                Text(t("↑↓ 選択   Enter 切替   Esc 閉じる", "↑↓ Select   Enter Switch   Esc Close"))
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button {
                     state.newPair()
                 } label: {
-                    Label("セットを追加", systemImage: "plus")
+                    Label(t("セットを追加", "Add set"), systemImage: "plus")
                 }
                 .buttonStyle(.borderless)
-                Button("Refresh") { state.refresh() }
+                Button(t("更新", "Refresh")) { state.refresh() }
                     .buttonStyle(.borderless)
             }
         }
-        .padding(16)
-        .frame(width: 500, height: 420)
+        .padding(design.contentPadding)
+        .frame(width: design.panelSize.width, height: design.panelSize.height)
+        .background {
+            if design == .macOSNative {
+                MacOSNativePaletteSurface()
+            } else if design.hasMaterialSurface {
+                Rectangle().fill(.thinMaterial)
+            } else {
+                design.canvasColor
+            }
+        }
         .onAppear { isSearchFocused = true }
+        .onChange(of: paletteRaw) { _ in
+            // The text field is replaced when changing between legacy/refined
+            // appearances; restore keyboard-first search immediately.
+            isSearchFocused = true
+            hoveredItemID = nil
+        }
         .onChange(of: state.query) { _ in state.selectedID = state.allResultIDs.first }
         .onChange(of: state.orderingRevision) { _ in
             if !state.allResultIDs.contains(state.selectedID ?? "") {
@@ -896,13 +1072,18 @@ struct SearchView: View {
         .onExitCommand { state.hidePanel?() }
         .sheet(isPresented: $state.editing) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Spaceの名前と検索タグ").font(.headline)
-                TextField("表示名（例：趣味）", text: $state.nameDraft)
-                Text("検索タグ").font(.subheadline.weight(.medium))
+                Text(t("名前と検索タグ", "Name and search tags")).font(.headline)
+                TextField(t("表示名（例：趣味）", "Name (e.g. Personal)"), text: $state.nameDraft)
+                    .focused($isNameInputFocused)
+                    .modifier(NativeSheetFieldSurface(
+                        enabled: design == .macOSNative, isFocused: isNameInputFocused))
+                Text(t("検索タグ", "Search tags")).font(.subheadline.weight(.medium))
                 TextField(state.editingTagIndex == nil
-                          ? "タグを入力してEnterで追加（スペースも使用可）"
-                          : "タグを編集してEnterで確定", text: $state.keywordInput)
+                          ? t("タグを入力してEnterで追加", "Enter a tag and press Return")
+                          : t("編集してEnterで確定", "Edit tag and press Return"), text: $state.keywordInput)
                     .focused($isTagInputFocused)
+                    .modifier(NativeSheetFieldSurface(
+                        enabled: design == .macOSNative, isFocused: isTagInputFocused))
                     .onSubmit {
                         state.commitPendingKeyword()
                         isTagInputFocused = true
@@ -922,7 +1103,7 @@ struct SearchView: View {
                                         Text("#" + state.tagsDraft[index])
                                             .lineLimit(1)
                                     }
-                                    .help("クリックしてタグを編集")
+                                    .help(t("クリックして編集", "Click to edit tag"))
                                     Button {
                                         state.removeTag(at: index)
                                     } label: {
@@ -930,8 +1111,8 @@ struct SearchView: View {
                                             .font(.caption2)
                                             .foregroundStyle(.tertiary)
                                     }
-                                    .help("「\(state.tagsDraft[index])」を削除")
-                                    .accessibilityLabel("タグ「\(state.tagsDraft[index])」を削除")
+                                    .help(t("「\(state.tagsDraft[index])」を削除", "Remove \(state.tagsDraft[index])"))
+                                    .accessibilityLabel(t("タグ「\(state.tagsDraft[index])」を削除", "Remove tag \(state.tagsDraft[index])"))
                                 }
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
@@ -946,10 +1127,10 @@ struct SearchView: View {
                         }
                     }
                 }
-                Text("Enterで追加・確定。タグをクリックすると再編集、×で削除できます。")
+                Text(t("タグをクリックして編集、×で削除", "Click a tag to edit; × to remove"))
                     .font(.caption).foregroundStyle(.secondary)
                 if !state.editingAppNames.isEmpty {
-                    Text("開いているアプリ（自動タグ）")
+                    Text(t("このSpaceのアプリ", "Apps in this Space"))
                         .font(.subheadline.weight(.medium))
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 6) {
@@ -959,35 +1140,47 @@ struct SearchView: View {
                             }
                         }
                     }
-                    Text("アプリのタグは保存せず、検索パネルを開くたびに更新します。")
+                    Text(t("アプリ名は検索にも使用されます。", "App names are included in search automatically."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if state.editingIsSessionOnly {
-                    Text("このSpaceには識別用UUIDがありません。誤ったSpaceへの名前引き継ぎを防ぐため、名前はONIWAを終了するまで有効です。")
+                    Text(t("このSpaceの名前は、ONIWAを終了するまで有効です。", "This Space's name is kept only until ONIWA quits."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack {
                     if state.hasEditingLabel {
-                        Button("名前とタグを削除") { state.deleteLabel() }
+                        Button(t("名前とタグを削除", "Remove name and tags")) { state.deleteLabel() }
                             .foregroundStyle(.red)
+                            .modifier(NativeSheetActionStyle(enabled: design == .macOSNative))
                     }
                     Spacer()
-                    Button("キャンセル") { state.cancelEdit() }
-                    Button("保存") { state.saveLabel() }
+                    Button(t("キャンセル", "Cancel")) { state.cancelEdit() }
+                        .modifier(NativeSheetActionStyle(enabled: design == .macOSNative))
+                    Button(t("保存", "Save")) { state.saveLabel() }
+                        .modifier(NativeSheetActionStyle(
+                            enabled: design == .macOSNative, prominent: true))
                 }
             }
-            .padding(20)
-            .frame(width: 380)
+            .padding(design == .macOSNative ? 24 : 20)
+            .frame(width: design == .macOSNative ? 420 : 380)
+            .background {
+                if design == .macOSNative {
+                    Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+                }
+            }
         }
         .sheet(isPresented: $state.pairEditing) {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Spaceセット").font(.headline)
-                Text("2つのモニターで同時に使うSpaceを登録します。")
+                Text(state.editingPairID == nil ? t("セットを追加", "Add set") : t("セットを編集", "Edit set")).font(.headline)
+                Text(t("2画面で一緒に切り替えるSpaceを選びます。", "Choose Spaces to switch together on two displays."))
                     .font(.caption).foregroundStyle(.secondary)
-                TextField("セット名（例：ONIWA開発）", text: $state.pairNameDraft)
-                Picker("1つ目のモニター", selection: $state.pairFirstKey) {
+                TextField(t("セット名（例：ONIWA開発）", "Set name (e.g. ONIWA Work)"), text: $state.pairNameDraft)
+                    .focused($isPairNameInputFocused)
+                    .modifier(NativeSheetFieldSurface(
+                        enabled: design == .macOSNative, isFocused: isPairNameInputFocused))
+                Picker(t("画面1", "Display 1"), selection: $state.pairFirstKey) {
                     ForEach(state.pairEligibleSpaces) { space in
                         Text("\(state.monitorName(space)) · \(state.spaceName(space)) · Space \(space.index + 1)")
                             .tag(space.identity.persistentKey ?? "")
@@ -996,33 +1189,90 @@ struct SearchView: View {
                 .onChange(of: state.pairFirstKey) { _ in
                     state.firstPairSpaceChanged()
                 }
-                Picker("2つ目のモニター", selection: $state.pairSecondKey) {
+                Picker(t("画面2", "Display 2"), selection: $state.pairSecondKey) {
                     ForEach(state.pairSecondChoices) { space in
                         Text("\(state.monitorName(space)) · \(state.spaceName(space)) · Space \(space.index + 1)")
                             .tag(space.identity.persistentKey ?? "")
                     }
                 }
                 if !state.pairCanSave {
-                    Text("別々のモニターにある、識別可能な2つのSpaceを選んでください。削除されたSpaceやUUIDのないSpaceは登録できません。")
+                    Text(SpacePair.cleanedName(state.pairNameDraft).isEmpty
+                         ? t("セット名を入力してください。", "Enter a set name.")
+                         : t("別々のモニターからSpaceを選んでください。",
+                             "Choose a Space from each display."))
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack {
                     if state.editingPairID != nil {
-                        Button("セットを削除", role: .destructive) { state.deletePair() }
+                        Button(t("セットを削除", "Delete set"), role: .destructive) { state.deletePair() }
+                            .modifier(NativeSheetActionStyle(enabled: design == .macOSNative))
                     }
                     Spacer()
-                    Button("キャンセル") { state.pairEditing = false }
-                    Button("保存") { state.savePair() }
+                    Button(t("キャンセル", "Cancel")) { state.pairEditing = false }
+                        .modifier(NativeSheetActionStyle(enabled: design == .macOSNative))
+                    Button(t("保存", "Save")) { state.savePair() }
                         .disabled(!state.pairCanSave)
+                        .modifier(NativeSheetActionStyle(
+                            enabled: design == .macOSNative, prominent: true))
                 }
             }
-            .padding(20)
-            .frame(width: 460)
+            .padding(design == .macOSNative ? 24 : 20)
+            .frame(width: design == .macOSNative ? 500 : 460)
+            .background {
+                if design == .macOSNative {
+                    Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+                }
+            }
         }
     }
 
  }
+
+/// Native settings slider lives inside the menu so it can update a visible
+/// search palette continuously, without adding another window or shortcut.
+struct GlassTransparencyMenuControl: View {
+    @AppStorage(GlassTransparencySettings.settingsKey)
+    private var transparencyPercent = GlassTransparencySettings.defaultPercent
+    @AppStorage(AppLanguage.settingsKey)
+    private var languageRaw = AppLanguage.japanese.rawValue
+
+    private var language: AppLanguage { AppLanguage(rawValue: languageRaw) ?? .japanese }
+    private func t(_ ja: String, _ en: String) -> String { language.text(ja, en) }
+
+    private var value: Binding<Double> {
+        Binding(
+            get: { Double(GlassTransparencySettings.clamped(transparencyPercent)) },
+            set: { transparencyPercent = GlassTransparencySettings.clamped(Int($0.rounded())) }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(t("背景の透明度", "Background Transparency"))
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Text("\(GlassTransparencySettings.clamped(transparencyPercent))%")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: 0...100, step: 1)
+                .accessibilityLabel(t("背景の透明度", "Background Transparency"))
+                .accessibilityValue("\(GlassTransparencySettings.clamped(transparencyPercent))%")
+            HStack {
+                Text(t("不透明", "Opaque"))
+                Spacer()
+                Text(t("透明", "Transparent"))
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(width: 252)
+    }
+}
 
 final class SearchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
@@ -1051,6 +1301,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var missionControlWaitRootItem: NSMenuItem?
     private var missionControlResetWaitItem: NSMenuItem?
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
+    private var paletteDesignItems: [PaletteDesign: NSMenuItem] = [:]
+    private var languageItems: [AppLanguage: NSMenuItem] = [:]
+    private var transparencyMenuRoot: NSMenuItem?
+
+    private var language: AppLanguage { AppLanguage.selected() }
+    private func t(_ ja: String, _ en: String) -> String { language.text(ja, en) }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Adopt independent, exclusive single/pair selections once.
@@ -1073,12 +1329,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.shortcutDescription = shortcut.current.title
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "庭"
+        statusItem = item
+        rebuildStatusMenu()
+        state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
+        state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
+    }
+
+    /// Rebuild only the status menu; do not re-register shortcuts or observers.
+    /// This ensures live language changes also update all menu titles.
+    private func rebuildStatusMenu() {
+        guard let item = statusItem, let shortcut else { return }
+        shortcutItems.removeAll()
+        paletteDesignItems.removeAll()
+        languageItems.removeAll()
         let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "Search Spaces…", action: #selector(openPanel), keyEquivalent: ""))
-        let shortcutRoot = NSMenuItem(title: "ショートカット", action: nil, keyEquivalent: "")
-        let shortcutMenu = NSMenu(title: "ショートカット")
+        menu.addItem(NSMenuItem(title: t("Spaceを検索…", "Search Spaces…"), action: #selector(openPanel), keyEquivalent: ""))
+        let shortcutRoot = NSMenuItem(title: t("ショートカット", "Shortcuts"), action: nil, keyEquivalent: "")
+        let shortcutMenu = NSMenu(title: t("ショートカット", "Shortcuts"))
         for preset in GlobalShortcut.Preset.allCases {
-            let option = NSMenuItem(title: preset == .optionSpace ? "⌥ Space（おすすめ）" : preset.title,
+            let option = NSMenuItem(title: preset == .optionSpace ? t("⌥ Space（おすすめ）", "⌥ Space (recommended)") : preset.title,
                                     action: #selector(changeShortcut(_:)),
                                     keyEquivalent: "")
             option.target = self
@@ -1088,7 +1357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             shortcutMenu.addItem(option)
         }
         shortcutMenu.addItem(NSMenuItem.separator())
-        let recorderItem = NSMenuItem(title: "ショートカットを記録…",
+        let recorderItem = NSMenuItem(title: t("ショートカットを記録…", "Record shortcut…"),
                                       action: #selector(recordShortcut),
                                       keyEquivalent: "")
         recorderItem.target = self
@@ -1099,12 +1368,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Keep the old switching UI in source for OS regression research,
         // but do not offer its experimental controls to ordinary users.
         let standardSwitch = NSMenuItem(
-            title: "切り替え方式：⌃←/→ 高速連打（50ms・標準）",
+            title: t("切り替え方式：⌃←/→ 高速連打（50ms・標準）", "Switching: ⌃←/→ (50 ms, default)"),
             action: nil, keyEquivalent: "")
         standardSwitch.isEnabled = false
-        standardSwitch.toolTip = "Mission Controlを表示せず、標準ショートカットを50ms間隔で連続送信。"
-            + "目的Spaceへの到達と全モニターの安定性を確認します。"
+        standardSwitch.toolTip = t("標準ショートカットでSpaceを切り替えます。", "Switch Spaces using the standard keyboard shortcuts.")
         menu.addItem(standardSwitch)
+
+        let designRoot = NSMenuItem(
+            title: t("検索パレットのデザイン", "Palette design"), action: nil, keyEquivalent: "")
+        let designMenu = NSMenu(title: t("検索パレットのデザイン", "Palette design"))
+        let activeDesign = PaletteDesign.active()
+        for option in PaletteDesign.visiblePresets {
+            let entry = NSMenuItem(
+                title: option.title,
+                action: #selector(selectPaletteDesign(_:)),
+                keyEquivalent: "")
+            entry.representedObject = option.rawValue
+            entry.state = option == activeDesign ? .on : .off
+            entry.toolTip = option.detail
+            entry.target = self
+            paletteDesignItems[option] = entry
+            designMenu.addItem(entry)
+        }
+        designRoot.submenu = designMenu
+        // With a single visible design there is nothing to choose. The
+        // submenu returns automatically if additional presets are restored.
+        if PaletteDesign.visiblePresets.count > 1 {
+            menu.addItem(designRoot)
+        }
+
+        // This is a macOS Native-only appearance setting. The embedded
+        // SwiftUI slider observes @AppStorage and updates the open panel live.
+        let glassRoot = NSMenuItem(title: t("背景の透明度", "Background Transparency"),
+                                   action: nil, keyEquivalent: "")
+        let glassMenu = NSMenu(title: t("背景の透明度", "Background Transparency"))
+        let sliderItem = NSMenuItem()
+        let sliderView = NSHostingView(rootView: GlassTransparencyMenuControl())
+        sliderView.frame = NSRect(x: 0, y: 0, width: 252, height: 88)
+        sliderItem.view = sliderView
+        glassMenu.addItem(sliderItem)
+        glassMenu.addItem(NSMenuItem.separator())
+        let resetGlass = NSMenuItem(
+            title: t("標準の透明度に戻す（20%）", "Reset transparency (20%)"),
+            action: #selector(resetGlassTransparency), keyEquivalent: "")
+        resetGlass.target = self
+        glassMenu.addItem(resetGlass)
+        glassRoot.submenu = glassMenu
+        glassRoot.isEnabled = activeDesign == .macOSNative
+        glassRoot.toolTip = t("macOS Nativeのみで使用できます。",
+                              "Available for macOS Native only.")
+        transparencyMenuRoot = glassRoot
+        menu.addItem(glassRoot)
+
+        let languageRoot = NSMenuItem(title: t("言語", "Language"), action: nil, keyEquivalent: "")
+        let languageMenu = NSMenu(title: t("言語", "Language"))
+        for option in AppLanguage.allCases {
+            let entry = NSMenuItem(title: option.title,
+                                   action: #selector(selectLanguage(_:)),
+                                   keyEquivalent: "")
+            entry.representedObject = option.rawValue
+            entry.state = option == language ? .on : .off
+            entry.target = self
+            languageItems[option] = entry
+            languageMenu.addItem(entry)
+        }
+        languageRoot.submenu = languageMenu
+        menu.addItem(languageRoot)
 
         #if ONIWA_LEGACY_SWITCHING_UI
         // Archived experiment UI: opt in at build time only.
@@ -1281,23 +1610,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         menu.addItem(NSMenuItem.separator())
-        let diagnosis = NSMenuItem(title: "ショートカット診断…",
+        let diagnosis = NSMenuItem(title: t("ショートカット診断…", "Shortcut diagnostics…"),
                                    action: #selector(showShortcutDiagnosis),
                                    keyEquivalent: "")
         diagnosis.target = self
         menu.addItem(diagnosis)
-        let switchLog = NSMenuItem(title: "切り替え診断ログを開く…",
+        let switchLog = NSMenuItem(title: t("切り替え診断ログを開く…", "Open switching log…"),
                                    action: #selector(openSwitchLog),
                                    keyEquivalent: "")
         switchLog.target = self
         menu.addItem(switchLog)
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit ONIWA", action: #selector(quit), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: t("ONIWAを終了", "Quit ONIWA"), action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items { item.target = self }
         item.menu = menu
-        statusItem = item
-        state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
-        state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
+    }
+
+    @objc private func resetGlassTransparency() {
+        GlassTransparencySettings.persist(GlassTransparencySettings.defaultPercent)
+    }
+
+    @objc private func selectLanguage(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let choice = AppLanguage(rawValue: raw) else { return }
+        choice.persist()
+        // @AppStorage refreshes SearchView and any open sheet immediately.
+        // Rebuild after the old menu closes to avoid mutating the tracked NSMenu.
+        DispatchQueue.main.async { [weak self] in self?.rebuildStatusMenu() }
     }
 
     private func singleModeSummary(_ mode: SingleSpaceSwitchMode) -> String {
@@ -1437,15 +1776,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func promptMissionControlCustomWait() {
         let alert = NSAlert()
-        alert.messageText = "Mission Controlの待機時間"
-        alert.informativeText = "100〜1000msの整数で入力してください。"
-            + "300msが推奨値です。300ms未満では切り替えに失敗する可能性があります。"
-        alert.addButton(withTitle: "設定")
-        alert.addButton(withTitle: "キャンセル")
+        alert.messageText = t("Mission Controlの待機時間", "Mission Control wait time")
+        alert.informativeText = t("100〜1000msで設定してください（推奨：300ms）。",
+                                 "Enter 100–1000 ms (recommended: 300 ms).")
+        alert.addButton(withTitle: t("設定", "Set"))
+        alert.addButton(withTitle: t("キャンセル", "Cancel"))
 
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.stringValue = String(MissionControlDirectSettings.readinessWaitMilliseconds)
-        field.placeholderString = "例：275"
+        field.placeholderString = t("例：275", "e.g. 275")
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         NSApp.activate(ignoringOtherApps: true)
@@ -1456,8 +1795,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               MissionControlDirectSettings.isValidReadinessWait(milliseconds) else {
             let warning = NSAlert()
             warning.alertStyle = .warning
-            warning.messageText = "待機時間を変更できませんでした"
-            warning.informativeText = "100〜1000の整数を入力してください。設定は変更されていません。"
+            warning.messageText = t("待機時間を変更できませんでした", "Couldn't change wait time")
+            warning.informativeText = t("100〜1000の整数を入力してください。設定は変更されていません。", "Enter a number from 100 to 1000. Nothing changed.")
             warning.runModal()
             return
         }
@@ -1476,8 +1815,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let chosen = MissionControlDirectSettings.readinessWaitMilliseconds
         let recommended = chosen == MissionControlDirectSettings.defaultReadinessWaitMilliseconds
         missionControlWaitRootItem?.title = recommended
-            ? "Mission Control待機時間：300ms（推奨）"
-            : "Mission Control待機時間：\(chosen)ms"
+            ? t("Mission Control待機時間：300ms（推奨）", "Mission Control wait: 300 ms (recommended)")
+            : t("Mission Control待機時間：\(chosen)ms", "Mission Control wait: \(chosen) ms")
         missionControlResetWaitItem?.isEnabled = !recommended
     }
 
@@ -1509,15 +1848,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let recorder = ShortcutRecorderView(frame: NSRect(x: 0, y: 0, width: 390, height: 102))
         let alert = NSAlert()
-        alert.messageText = "ショートカットを記録"
-        alert.informativeText = """
-        使いたいキーをそのまま押してください。⌘・⌃・⌥のいずれかが必要です。
-        初期候補は ⌥ Space。保存できない場合は元のキーに戻します。
-        """
+        alert.messageText = t("ショートカットを記録", "Record shortcut")
+        alert.informativeText = t(
+            "使いたいキーを押してください（⌘・⌃・⌥のいずれかが必要）。",
+            "Press your shortcut (include ⌘, ⌃ or ⌥)."
+        )
         alert.alertStyle = .informational
         alert.accessoryView = recorder
-        alert.addButton(withTitle: "設定する")
-        alert.addButton(withTitle: "キャンセル")
+        alert.addButton(withTitle: t("設定する", "Apply"))
+        alert.addButton(withTitle: t("キャンセル", "Cancel"))
         DispatchQueue.main.async {
             alert.window.makeFirstResponder(recorder)
         }
@@ -1530,8 +1869,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let candidate = recorder.recorded else {
             _ = shortcut.endRecording(nil)
             let warning = NSAlert()
-            warning.messageText = "キーが記録されていません"
-            warning.informativeText = "記録欄をクリックしてキーの組み合わせを押してください。"
+            warning.messageText = t("キーが記録されていません", "No shortcut recorded")
+            warning.informativeText = t("記録欄をクリックしてキーの組み合わせを押してください。", "Click the recorder and press your shortcut.")
             warning.runModal()
             return
         }
@@ -1545,10 +1884,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showShortcutFailure() {
         let alert = NSAlert()
-        alert.messageText = "ショートカットの設定に失敗しました"
-        alert.informativeText = shortcut?.registrationError ?? "macOSまたは別のアプリと競合している可能性があります。"
+        alert.messageText = t("ショートカットの設定に失敗しました", "Couldn't set shortcut")
+        alert.informativeText = shortcut?.registrationError ?? t("macOSまたは別のアプリと競合している可能性があります。", "macOS or another app may be using this shortcut.")
         alert.alertStyle = .warning
         alert.runModal()
+    }
+
+    private func applyPaletteWindowStyle(_ choice: PaletteDesign) {
+        guard let panel else { return }
+        let glass = choice == .macOSNative
+        // The transparent panel backing allows ultraThinMaterial to sample
+        // the actual desktop rather than an opaque window background.
+        panel.isOpaque = !glass
+        panel.backgroundColor = glass ? .clear : .windowBackgroundColor
+        panel.titlebarAppearsTransparent = glass
+        panel.titleVisibility = glass ? .hidden : .visible
+    }
+
+    @objc private func selectPaletteDesign(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let choice = PaletteDesign(rawValue: raw) else { return }
+        choice.persist()
+        for (design, item) in paletteDesignItems {
+            item.state = design == choice ? .on : .off
+        }
+        // SearchView observes the same preference through @AppStorage, so
+        // results, current selection, query and keyboard routing are retained.
+        transparencyMenuRoot?.isEnabled = choice == .macOSNative
+        applyPaletteWindowStyle(choice)
+        panel?.setContentSize(NSSize(width: choice.panelSize.width,
+                                     height: choice.panelSize.height))
+        if panel?.isVisible == true { panel?.center() }
     }
 
     @objc private func openSwitchLog() {
@@ -1557,20 +1923,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.open(url)
         } else {
             let alert = NSAlert()
-            alert.messageText = "切り替え診断ログはまだありません"
-            alert.informativeText = "Spaceの切り替えを一度行うと、ローカルに記録されます。"
+            alert.messageText = t("切り替え診断ログはまだありません", "No switching log yet")
+            alert.informativeText = t("Spaceの切り替えを一度行うと、ローカルに記録されます。", "Switch a Space to create a local diagnostic log.")
             alert.runModal()
         }
     }
 
     @objc private func showShortcutDiagnosis() {
         let alert = NSAlert()
-        alert.messageText = "ONIWA ショートカット診断"
+        alert.messageText = t("ONIWA ショートカット診断", "ONIWA shortcut diagnostics")
         let keyboardStatus = CGPreflightPostEventAccess()
-            ? "許可済み（Core Graphics）" : "未許可（アクセシビリティの設定を確認）"
+            ? t("許可済み（Core Graphics）", "Granted (Core Graphics)") : t("未許可（アクセシビリティの設定を確認）", "Not granted (check Accessibility settings)")
         let hotkeyStatus = shortcut?.diagnosticSummary()
-            ?? "ショートカット管理が開始されていません。"
-        alert.informativeText = hotkeyStatus + "\n\nキー操作の送信権限: " + keyboardStatus
+            ?? t("ショートカット管理が開始されていません。", "Shortcut manager isn't running.")
+        alert.informativeText = hotkeyStatus + t("\n\nキー操作の送信権限: ", "\n\nKey posting permission: ") + keyboardStatus
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
@@ -1647,7 +2013,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state.refresh()
         }
         if panel == nil {
-            let window = SearchPanel(contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
+            let preferred = PaletteDesign.active().panelSize
+            let window = SearchPanel(contentRect: NSRect(
+                x: 0, y: 0, width: preferred.width, height: preferred.height),
                                      styleMask: [.titled, .fullSizeContentView],
                                      backing: .buffered, defer: false)
             window.title = "ONIWA"
@@ -1656,6 +2024,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.contentView = NSHostingView(rootView: SearchView(state: state))
             panel = window
+            applyPaletteWindowStyle(PaletteDesign.active())
         }
         panel?.center()
         NSApp.activate(ignoringOtherApps: true)
