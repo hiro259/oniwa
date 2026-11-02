@@ -1035,7 +1035,7 @@ struct SearchView: View {
         .frame(width: design.panelSize.width, height: design.panelSize.height)
         .background {
             if design == .macOSNative {
-                Rectangle().fill(.ultraThinMaterial)
+                MacOSNativePaletteSurface()
             } else if design.hasMaterialSurface {
                 Rectangle().fill(.thinMaterial)
             } else {
