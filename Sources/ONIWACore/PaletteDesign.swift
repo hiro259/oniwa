@@ -14,6 +14,22 @@ public enum PaletteDesign: String, CaseIterable, Identifiable {
 
     public static let settingsKey = "oniwa.paletteDesign"
 
+    /// Only macOS Native is exposed for now. Other presets remain implemented
+    /// so they can be reintroduced without losing existing stored preferences.
+    public static let visiblePresets: [PaletteDesign] = [.macOSNative]
+
+    /// Never render a temporarily hidden preset, including for users who
+    /// previously saved one of the seven other designs.
+    public static func active(rawValue: String?) -> PaletteDesign {
+        let requested = rawValue.flatMap(PaletteDesign.init(rawValue:))
+        return requested.flatMap { visiblePresets.contains($0) ? $0 : nil }
+            ?? visiblePresets[0]
+    }
+
+    public static func active(in defaults: UserDefaults = .standard) -> PaletteDesign {
+        active(rawValue: defaults.string(forKey: settingsKey))
+    }
+
     public var id: String { rawValue }
 
     public var title: String {
@@ -44,7 +60,7 @@ public enum PaletteDesign: String, CaseIterable, Identifiable {
 
     public static func selected(in defaults: UserDefaults = .standard) -> PaletteDesign {
         guard let raw = defaults.string(forKey: settingsKey),
-              let design = PaletteDesign(rawValue: raw) else { return .nativeCalm }
+              let design = PaletteDesign(rawValue: raw) else { return .macOSNative }
         return design
     }
 
