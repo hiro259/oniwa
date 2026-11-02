@@ -46,9 +46,17 @@ The transparent NSPanel continues to use `ultraThinMaterial`, but an appearance-
 
 **Manual visual verification still required:** compare light/dark appearance on black, bright and colorful wallpaper; verify readable secondary text and keyboard hints, selected vs hovered vs current rows, search focus, and increased-contrast appearance. The macOS build in CI cannot assess actual WindowServer blur and wallpaper sampling.
 
+## macOS language auto-detection (separate follow-up PR)
+
+On first launch, ONIWA follows the Mac's highest-priority preferred language: **Japanese** if it starts with `ja`; **English** for English and all other languages (fallback). This is evaluated again when the app starts, so changing the macOS language affects the next launch as long as no manual language has been chosen.
+
+In the menu choose **庭 → 言語 → 自動（macOSの言語） / 日本語 / English** (or **ONIWA → Language → Automatic (macOS language) / 日本語 / English**). Choosing Japanese or English explicitly stores the override in `oniwa.interfaceLanguage`; it always takes precedence over the Mac's preference and survives restarts. Choosing Automatic restores system-following mode. Existing explicit Japanese/English settings are not changed during upgrade.
+
+The setting only localizes the interface. User-authored Space names, tags, pair names and the Space switcher remain untouched. The language UI updates immediately on a menu change. To pick up a language change in macOS System Settings, restart ONIWA. The follow-up is developed on top of PR #16 and is merged separately.
+
 ## UI copy and bilingual display (Issue #12 — preview)
 
-The search palette, Space/tag editor, paired-Space editor, main menu, and normal diagnostics now have shorter Japanese wording and an English alternative. Switch via **庭 → 言語 → 日本語 / English** (English: **ONIWA menu → Language → Japanese / English**). The choice is saved to `UserDefaults` at `oniwa.interfaceLanguage`, applied immediately through SwiftUI `@AppStorage`, and kept after restart. The menu updates without restarting the app or re-registering its global hotkey. Existing installations continue to default to Japanese.
+The search palette, Space/tag editor, paired-Space editor, main menu, and normal diagnostics now have shorter Japanese wording and an English alternative. Switch via **庭 → 言語 → 日本語 / English** (English: **ONIWA menu → Language → Japanese / English**). The choice is saved to `UserDefaults` at `oniwa.interfaceLanguage`, applied immediately through SwiftUI `@AppStorage`, and kept after restart. The menu updates without restarting the app or re-registering its global hotkey. Existing explicit Japanese/English settings remain authoritative; users without a manual choice follow macOS.
 
 The app does not translate user-authored Space names, tag text, or paired-Space names. It only localizes interface copy. The `macOS Native` theme is the only exposed preset for now; seven older designs remain implemented but hidden. Its selected and hovered row controls, switching engine, search ranking, saved tags, and Space identities are unchanged. New `AppLanguageTests` verify both languages, defaults, and persistence.
 
