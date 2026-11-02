@@ -1250,7 +1250,7 @@ struct GlassTransparencyMenuControl: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                Text(t("透明度", "Transparency"))
+                Text(t("背景の透明度", "Background Transparency"))
                     .font(.system(size: 12, weight: .medium))
                 Spacer()
                 Text("\(GlassTransparencySettings.clamped(transparencyPercent))%")
@@ -1258,7 +1258,7 @@ struct GlassTransparencyMenuControl: View {
                     .foregroundStyle(.secondary)
             }
             Slider(value: value, in: 0...100, step: 1)
-                .accessibilityLabel(t("すりガラスの透明度", "Glass transparency"))
+                .accessibilityLabel(t("背景の透明度", "Background Transparency"))
                 .accessibilityValue("\(GlassTransparencySettings.clamped(transparencyPercent))%")
             HStack {
                 Text(t("不透明", "Opaque"))
@@ -1395,9 +1395,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // This is a macOS Native-only appearance setting. The embedded
         // SwiftUI slider observes @AppStorage and updates the open panel live.
-        let glassRoot = NSMenuItem(title: t("すりガラスの透明度", "Glass transparency"),
+        let glassRoot = NSMenuItem(title: t("背景の透明度", "Background Transparency"),
                                    action: nil, keyEquivalent: "")
-        let glassMenu = NSMenu(title: t("すりガラスの透明度", "Glass transparency"))
+        let glassMenu = NSMenu(title: t("背景の透明度", "Background Transparency"))
         let sliderItem = NSMenuItem()
         let sliderView = NSHostingView(rootView: GlassTransparencyMenuControl())
         sliderView.frame = NSRect(x: 0, y: 0, width: 252, height: 88)
