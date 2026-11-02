@@ -604,9 +604,9 @@ private struct LiveSpaceReorderDelegate: DropDelegate {
 struct SearchView: View {
     @ObservedObject var state: SearchState
     @AppStorage(PaletteDesign.settingsKey) private var paletteRaw = PaletteDesign.macOSNative.rawValue
-    @AppStorage(AppLanguage.settingsKey) private var languageRaw = AppLanguage.japanese.rawValue
+    @AppStorage(AppLanguage.settingsKey) private var languageRaw = AppLanguage.automaticValue
     private var design: PaletteDesign { PaletteDesign.active(rawValue: paletteRaw) }
-    private var language: AppLanguage { AppLanguage(rawValue: languageRaw) ?? .japanese }
+    private var language: AppLanguage { AppLanguage.effective(rawValue: languageRaw) }
     private func t(_ ja: String, _ en: String) -> String { language.text(ja, en) }
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isTagInputFocused: Bool
@@ -1235,9 +1235,9 @@ struct GlassTransparencyMenuControl: View {
     @AppStorage(GlassTransparencySettings.settingsKey)
     private var transparencyPercent = GlassTransparencySettings.defaultPercent
     @AppStorage(AppLanguage.settingsKey)
-    private var languageRaw = AppLanguage.japanese.rawValue
+    private var languageRaw = AppLanguage.automaticValue
 
-    private var language: AppLanguage { AppLanguage(rawValue: languageRaw) ?? .japanese }
+    private var language: AppLanguage { AppLanguage.effective(rawValue: languageRaw) }
     private func t(_ ja: String, _ en: String) -> String { language.text(ja, en) }
 
     private var value: Binding<Double> {
@@ -1422,12 +1422,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let languageRoot = NSMenuItem(title: t("言語", "Language"), action: nil, keyEquivalent: "")
         let languageMenu = NSMenu(title: t("言語", "Language"))
+        let followingSystem = AppLanguage.isFollowingSystem()
+        let automatic = NSMenuItem(
+            title: t("自動（macOSの言語）", "Automatic (macOS language)"),
+            action: #selector(followSystemLanguage), keyEquivalent: "")
+        automatic.target = self
+        automatic.state = followingSystem ? .on : .off
+        languageMenu.addItem(automatic)
+        languageMenu.addItem(NSMenuItem.separator())
         for option in AppLanguage.allCases {
             let entry = NSMenuItem(title: option.title,
                                    action: #selector(selectLanguage(_:)),
                                    keyEquivalent: "")
             entry.representedObject = option.rawValue
-            entry.state = option == language ? .on : .off
+            entry.state = !followingSystem && option == language ? .on : .off
             entry.target = self
             languageItems[option] = entry
             languageMenu.addItem(entry)
@@ -1628,6 +1636,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func resetGlassTransparency() {
         GlassTransparencySettings.persist(GlassTransparencySettings.defaultPercent)
+    }
+
+    @objc private func followSystemLanguage() {
+        AppLanguage.followSystem()
+        // @AppStorage refreshes open SwiftUI views. Rebuild the menu after
+        // closing the tracked menu, without touching shortcuts or observers.
+        DispatchQueue.main.async { [weak self] in self?.rebuildStatusMenu() }
     }
 
     @objc private func selectLanguage(_ sender: NSMenuItem) {
