@@ -192,10 +192,10 @@ extension PaletteDesign {
 /// inherit too much of the wallpaper, especially in Light appearance.
 struct MacOSNativePaletteSurface: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityContrast) private var accessibilityContrast
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     private var washOpacity: Double {
-        if accessibilityContrast == .increased { return 0.94 }
+        if colorSchemeContrast == .increased { return 0.94 }
         return colorScheme == .dark ? 0.76 : 0.84
     }
 
@@ -214,12 +214,12 @@ struct MacOSNativePaletteSurface: View {
 /// focus affordance in both appearances, never a heavy macOS blue ring.
 struct MacOSNativeSearchSurface: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityContrast) private var accessibilityContrast
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     let isFocused: Bool
 
     private var strokeOpacity: Double {
-        if accessibilityContrast == .increased { return 0.52 }
+        if colorSchemeContrast == .increased { return 0.52 }
         return isFocused ? (colorScheme == .dark ? 0.44 : 0.32) : (colorScheme == .dark ? 0.20 : 0.13)
     }
 
@@ -354,7 +354,7 @@ struct RefinedSearchSurface: ViewModifier {
 /// while "current" remains distinguishable from keyboard focus.
 struct PaletteRowSurface: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityContrast) private var accessibilityContrast
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     let design: PaletteDesign
     let isSelected: Bool
@@ -387,13 +387,13 @@ struct PaletteRowSurface: ViewModifier {
             // The entire selected row must remain identifiable against a
             // dark glass panel, independent of where the mouse pointer sits.
             if isSelected {
-                let opacity = accessibilityContrast == .increased ? 0.27
+                let opacity = colorSchemeContrast == .increased ? 0.27
                     : (colorScheme == .dark ? 0.20 : 0.16)
                 stops = [Color.accentColor.opacity(opacity),
                          Color.accentColor.opacity(opacity)]
             } else {
                 let opacity = isHovered
-                    ? (accessibilityContrast == .increased ? 0.14
+                    ? (colorSchemeContrast == .increased ? 0.14
                         : (colorScheme == .dark ? 0.105 : 0.070))
                     : 0.0
                 stops = [Color.primary.opacity(opacity),
@@ -416,7 +416,7 @@ struct PaletteRowSurface: ViewModifier {
         if design == .macOSNative {
             if isSelected {
                 return Color.accentColor.opacity(
-                    accessibilityContrast == .increased ? 0.60
+                    colorSchemeContrast == .increased ? 0.60
                     : (colorScheme == .dark ? 0.34 : 0.23))
             }
             if isHovered {
