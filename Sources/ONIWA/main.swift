@@ -1229,6 +1229,51 @@ struct SearchView: View {
 
  }
 
+/// Native settings slider lives inside the menu so it can update a visible
+/// search palette continuously, without adding another window or shortcut.
+struct GlassTransparencyMenuControl: View {
+    @AppStorage(GlassTransparencySettings.settingsKey)
+    private var transparencyPercent = GlassTransparencySettings.defaultPercent
+    @AppStorage(AppLanguage.settingsKey)
+    private var languageRaw = AppLanguage.japanese.rawValue
+
+    private var language: AppLanguage { AppLanguage(rawValue: languageRaw) ?? .japanese }
+    private func t(_ ja: String, _ en: String) -> String { language.text(ja, en) }
+
+    private var value: Binding<Double> {
+        Binding(
+            get: { Double(GlassTransparencySettings.clamped(transparencyPercent)) },
+            set: { transparencyPercent = GlassTransparencySettings.clamped(Int($0.rounded())) }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text(t("透明度", "Transparency"))
+                    .font(.system(size: 12, weight: .medium))
+                Spacer()
+                Text("\(GlassTransparencySettings.clamped(transparencyPercent))%")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+            Slider(value: value, in: 0...100, step: 1)
+                .accessibilityLabel(t("すりガラスの透明度", "Glass transparency"))
+                .accessibilityValue("\(GlassTransparencySettings.clamped(transparencyPercent))%")
+            HStack {
+                Text(t("不透明", "Opaque"))
+                Spacer()
+                Text(t("透明", "Transparent"))
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(width: 252)
+    }
+}
+
 final class SearchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
@@ -1258,6 +1303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shortcutItems: [GlobalShortcut.Preset: NSMenuItem] = [:]
     private var paletteDesignItems: [PaletteDesign: NSMenuItem] = [:]
     private var languageItems: [AppLanguage: NSMenuItem] = [:]
+    private var transparencyMenuRoot: NSMenuItem?
 
     private var language: AppLanguage { AppLanguage.selected() }
     private func t(_ ja: String, _ en: String) -> String { language.text(ja, en) }
@@ -1346,6 +1392,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         designRoot.submenu = designMenu
         menu.addItem(designRoot)
+
+        // This is a macOS Native-only appearance setting. The embedded
+        // SwiftUI slider observes @AppStorage and updates the open panel live.
+        let glassRoot = NSMenuItem(title: t("すりガラスの透明度", "Glass transparency"),
+                                   action: nil, keyEquivalent: "")
+        let glassMenu = NSMenu(title: t("すりガラスの透明度", "Glass transparency"))
+        let sliderItem = NSMenuItem()
+        let sliderView = NSHostingView(rootView: GlassTransparencyMenuControl())
+        sliderView.frame = NSRect(x: 0, y: 0, width: 252, height: 88)
+        sliderItem.view = sliderView
+        glassMenu.addItem(sliderItem)
+        glassMenu.addItem(NSMenuItem.separator())
+        let resetGlass = NSMenuItem(
+            title: t("標準の透明度に戻す（20%）", "Reset transparency (20%)"),
+            action: #selector(resetGlassTransparency), keyEquivalent: "")
+        resetGlass.target = self
+        glassMenu.addItem(resetGlass)
+        glassRoot.submenu = glassMenu
+        glassRoot.isEnabled = activeDesign == .macOSNative
+        glassRoot.toolTip = t("macOS Nativeのみで使用できます。",
+                              "Available for macOS Native only.")
+        transparencyMenuRoot = glassRoot
+        menu.addItem(glassRoot)
 
         let languageRoot = NSMenuItem(title: t("言語", "Language"), action: nil, keyEquivalent: "")
         let languageMenu = NSMenu(title: t("言語", "Language"))
@@ -1551,6 +1620,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: t("ONIWAを終了", "Quit ONIWA"), action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items { item.target = self }
         item.menu = menu
+    }
+
+    @objc private func resetGlassTransparency() {
+        GlassTransparencySettings.persist(GlassTransparencySettings.defaultPercent)
     }
 
     @objc private func selectLanguage(_ sender: NSMenuItem) {
@@ -1833,6 +1906,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // SearchView observes the same preference through @AppStorage, so
         // results, current selection, query and keyboard routing are retained.
+        transparencyMenuRoot?.isEnabled = choice == .macOSNative
         applyPaletteWindowStyle(choice)
         panel?.setContentSize(NSSize(width: choice.panelSize.width,
                                      height: choice.panelSize.height))
