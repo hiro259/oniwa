@@ -191,12 +191,15 @@ extension PaletteDesign {
 /// bright, and colorful desktop wallpapers. Ultra-thin material alone can
 /// inherit too much of the wallpaper, especially in Light appearance.
 struct MacOSNativePaletteSurface: View {
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.colorSchemeContrast) private var colorSchemeContrast
+    @AppStorage(GlassTransparencySettings.settingsKey)
+    private var transparencyPercent = GlassTransparencySettings.defaultPercent
 
     private var washOpacity: Double {
-        if colorSchemeContrast == .increased { return 0.94 }
-        return colorScheme == .dark ? 0.76 : 0.84
+        GlassTransparencySettings.backgroundOpacity(
+            percent: transparencyPercent,
+            increasedContrast: colorSchemeContrast == .increased
+        )
     }
 
     var body: some View {
