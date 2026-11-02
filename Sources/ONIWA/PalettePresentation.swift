@@ -187,19 +187,58 @@ extension PaletteDesign {
 }
 
 
-/// A native search-field silhouette without a heavy blue focus ring or stroke.
-/// The control uses a subtle semantic fill, with no card or border decoration.
+/// Keep native glass while providing a stable, legible background on black,
+/// bright, and colorful desktop wallpapers. Ultra-thin material alone can
+/// inherit too much of the wallpaper, especially in Light appearance.
+struct MacOSNativePaletteSurface: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityContrast) private var accessibilityContrast
+
+    private var washOpacity: Double {
+        if accessibilityContrast == .increased { return 0.94 }
+        return colorScheme == .dark ? 0.76 : 0.84
+    }
+
+    var body: some View {
+        Rectangle()
+            .fill(.ultraThinMaterial)
+            .overlay {
+                Color(nsColor: .windowBackgroundColor)
+                    .opacity(washOpacity)
+            }
+            .ignoresSafeArea()
+    }
+}
+
+/// The search field needs a distinct surface and a restrained, visible
+/// focus affordance in both appearances, never a heavy macOS blue ring.
 struct MacOSNativeSearchSurface: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityContrast) private var accessibilityContrast
+
     let isFocused: Bool
+
+    private var strokeOpacity: Double {
+        if accessibilityContrast == .increased { return 0.52 }
+        return isFocused ? (colorScheme == .dark ? 0.44 : 0.32) : (colorScheme == .dark ? 0.20 : 0.13)
+    }
 
     func body(content: Content) -> some View {
         content
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
-            .background(
-                Color(nsColor: .controlBackgroundColor).opacity(isFocused ? 0.70 : 0.52),
-                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-            )
+            .background {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor)
+                        .opacity(colorScheme == .dark ? 0.95 : 0.92))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(isFocused ? Color.accentColor.opacity(strokeOpacity)
+                                              : Color.primary.opacity(strokeOpacity),
+                                  lineWidth: 1)
+                    .allowsHitTesting(false)
+            }
             .animation(.easeOut(duration: 0.16), value: isFocused)
     }
 }
@@ -314,6 +353,9 @@ struct RefinedSearchSurface: ViewModifier {
 /// decorative surface changes. Refined themes animate hover and selection,
 /// while "current" remains distinguishable from keyboard focus.
 struct PaletteRowSurface: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityContrast) private var accessibilityContrast
+
     let design: PaletteDesign
     let isSelected: Bool
     let isCurrent: Bool
@@ -342,14 +384,20 @@ struct PaletteRowSurface: ViewModifier {
             let opacity = isSelected ? 0.105 : (isHovered ? 0.055 : (isCurrent ? 0.035 : 0))
             stops = [Color.secondary.opacity(opacity), Color.secondary.opacity(opacity)]
         case .macOSNative:
-            // The native highlight spans the whole row; no vertical accent bar.
-            // A subtle hover shade remains visible when a row is not selected.
+            // The entire selected row must remain identifiable against a
+            // dark glass panel, independent of where the mouse pointer sits.
             if isSelected {
-                stops = [Color.accentColor.opacity(0.105),
-                         Color.accentColor.opacity(0.105)]
+                let opacity = accessibilityContrast == .increased ? 0.27
+                    : (colorScheme == .dark ? 0.20 : 0.16)
+                stops = [Color.accentColor.opacity(opacity),
+                         Color.accentColor.opacity(opacity)]
             } else {
-                let shade = Color.primary.opacity(isHovered ? 0.045 : 0)
-                stops = [shade, shade]
+                let opacity = isHovered
+                    ? (accessibilityContrast == .increased ? 0.14
+                        : (colorScheme == .dark ? 0.105 : 0.070))
+                    : 0.0
+                stops = [Color.primary.opacity(opacity),
+                         Color.primary.opacity(opacity)]
             }
         default:
             let color = isSelected ? Color.accentColor.opacity(design.selectedOpacity)
@@ -365,7 +413,18 @@ struct PaletteRowSurface: ViewModifier {
             if isCurrent { return Color.secondary.opacity(0.22) }
             return Color.secondary.opacity(isHovered ? 0.16 : 0.075)
         }
-        if design == .pureMonochrome || design == .macOSNative { return .clear }
+        if design == .macOSNative {
+            if isSelected {
+                return Color.accentColor.opacity(
+                    accessibilityContrast == .increased ? 0.60
+                    : (colorScheme == .dark ? 0.34 : 0.23))
+            }
+            if isHovered {
+                return Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.085)
+            }
+            return .clear
+        }
+        if design == .pureMonochrome { return .clear }
         return isCurrent ? Color.secondary.opacity(0.40) : .clear
     }
 
