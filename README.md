@@ -62,6 +62,10 @@ The app does not translate user-authored Space names, tag text, or paired-Space 
 
 Mac manual checks before merge: switch languages with the search palette open and while an editor sheet is visible; check menus, sorting, help, names and tags, font fit, display labels, restart persistence, keyboard/IME, and both visual appearances. Experimental archived switching menus behind `ONIWA_LEGACY_SWITCHING_UI` remain developer-only.
 
+## Menu bar symbol
+
+The menu bar shows a **single four-stone symbol** rather than the text `庭`. It is a vector `NSImage` template, so macOS automatically renders the silhouette in the appropriate light/dark foreground color. The fine sand ripples from the full-color app icon are intentionally omitted at 18 pt for clarity. The ONIWA menu actions, `⌥ Space` search shortcut and Space-switching behavior are unchanged; hover the menu bar symbol for the ONIWA tooltip.
+
 ## First prototype
 
 - **New installations:** `⌥ Option + Space` opens the search palette by default. Existing installations retain their previously selected shortcut until changed. The menu-bar **庭** remains the fallback if a combination is intercepted by macOS.

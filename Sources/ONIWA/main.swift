@@ -1328,7 +1328,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.shortcut = shortcut
         state.shortcutDescription = shortcut.current.title
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "庭"
+        if let button = item.button {
+            button.title = ""
+            button.image = MenuBarSymbol.makeImage()
+            button.imagePosition = .imageOnly
+            button.toolTip = "ONIWA"
+        }
         statusItem = item
         rebuildStatusMenu()
         state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
