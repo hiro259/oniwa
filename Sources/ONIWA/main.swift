@@ -1349,6 +1349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         languageItems.removeAll()
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: t("Spaceを検索…", "Search Spaces…"), action: #selector(openPanel), keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
         let shortcutRoot = NSMenuItem(title: t("ショートカット", "Shortcuts"), action: nil, keyEquivalent: "")
         let shortcutMenu = NSMenu(title: t("ショートカット", "Shortcuts"))
         for preset in GlobalShortcut.Preset.allCases {
@@ -1369,15 +1370,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutMenu.addItem(recorderItem)
         shortcutRoot.submenu = shortcutMenu
         menu.addItem(shortcutRoot)
-        // ONIWA standard: the verified 50ms Control+Arrow burst.
-        // Keep the old switching UI in source for OS regression research,
-        // but do not offer its experimental controls to ordinary users.
-        let standardSwitch = NSMenuItem(
-            title: t("切り替え方式：⌃←/→ 高速連打（50ms・標準）", "Switching: ⌃←/→ (50 ms, default)"),
-            action: nil, keyEquivalent: "")
-        standardSwitch.isEnabled = false
-        standardSwitch.toolTip = t("標準ショートカットでSpaceを切り替えます。", "Switch Spaces using the standard keyboard shortcuts.")
-        menu.addItem(standardSwitch)
+        // The standard 50ms Control+Arrow Space switcher is unchanged.
+        // Omit its noninteractive status row from the everyday menu.
 
         let designRoot = NSMenuItem(
             title: t("検索パレットのデザイン", "Palette design"), action: nil, keyEquivalent: "")
@@ -1449,6 +1443,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(languageRoot)
 
         #if ONIWA_LEGACY_SWITCHING_UI
+        menu.addItem(NSMenuItem.separator())
         // Archived experiment UI: opt in at build time only.
         // The implementation paths and persisted experiment settings remain.
         // Both saved modes are suspended while it is ON, not overwritten.
@@ -1623,16 +1618,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         menu.addItem(NSMenuItem.separator())
+        // Keep both support tools accessible without cluttering the usual menu.
+        let diagnosticsRoot = NSMenuItem(
+            title: t("診断", "Diagnostics"), action: nil, keyEquivalent: "")
+        let diagnosticsMenu = NSMenu(title: t("診断", "Diagnostics"))
         let diagnosis = NSMenuItem(title: t("ショートカット診断…", "Shortcut diagnostics…"),
                                    action: #selector(showShortcutDiagnosis),
                                    keyEquivalent: "")
         diagnosis.target = self
-        menu.addItem(diagnosis)
+        diagnosticsMenu.addItem(diagnosis)
         let switchLog = NSMenuItem(title: t("切り替え診断ログを開く…", "Open switching log…"),
                                    action: #selector(openSwitchLog),
                                    keyEquivalent: "")
         switchLog.target = self
-        menu.addItem(switchLog)
+        diagnosticsMenu.addItem(switchLog)
+        diagnosticsRoot.submenu = diagnosticsMenu
+        menu.addItem(diagnosticsRoot)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: t("ONIWAを終了", "Quit ONIWA"), action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items { item.target = self }
