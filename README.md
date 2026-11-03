@@ -151,6 +151,22 @@ There is a regression test using the user's exact original and reordered ID arra
 5. Rearrange Spaces, then rename individual Space labels; the set should still select the original UUID identities.
 6. Remove a target Space or disconnect its monitor; verify the pair reports unavailable and does not choose an arbitrary replacement. Recreate/reconnect and edit it explicitly.
 7. Test fullscreen Spaces and the instant-switch ON/OFF setting. Check that failure messages do not claim success after only one display moved.
+## ONIWA app icon (local build)
+
+The macOS app icon is bundled by `sh build.sh` **before code signing**. Place either `Resources/AppIcon.icns` (preferred) or `Resources/ONIWA-AppIcon.icns` in the repository. If only the ten-image iconset is available, `Resources/AppIcon.iconset/` or `Resources/ONIWA-AppIcon.iconset/` is also supported; the build converts it with macOS `iconutil`. The finished app contains `Contents/Resources/AppIcon.icns` and its generated `Info.plist` declares `CFBundleIconFile`.
+
+If no icon asset is present, source-only CI builds continue without an icon and print a notice. **This means the image itself must still be added to the repository before a distributed release**; the integration script alone does not ship an icon.
+
+For a local check (fish):
+
+```fish
+cd ~/myfile/oniwa
+sh build.sh
+/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' build/ONIWA.app/Contents/Info.plist
+ls -lh build/ONIWA.app/Contents/Resources/AppIcon.icns
+open build/ONIWA.app
+```
+
 ## Build (macOS)
 
 Requires macOS 13+, Apple developer command line tools or Xcode.
