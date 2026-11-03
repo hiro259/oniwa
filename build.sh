@@ -32,6 +32,8 @@ cp Resources/Info.plist build/ONIWA.app/Contents/Info.plist
 # as a ready-to-use ICNS, or as the ten-PNG iconset (converted by iconutil).
 # Source-only CI builds remain valid until the binary asset is committed.
 ICON_OUTPUT=build/ONIWA.app/Contents/Resources/AppIcon.icns
+# Avoid carrying a stale bundled icon across rebuilds when assets are changed.
+rm -f "$ICON_OUTPUT"
 ICON_SOURCE=
 for candidate in Resources/AppIcon.icns Resources/ONIWA-AppIcon.icns; do
     if [ -f "$candidate" ]; then
