@@ -68,6 +68,18 @@ The menu contains **Spaceを検索… / Search Spaces…**, **ショートカッ
 
 The menu bar shows a **single four-stone symbol** rather than the text `庭`. It is a vector `NSImage` template, so macOS automatically renders the silhouette in the appropriate light/dark foreground color. The fine sand ripples from the full-color app icon are intentionally omitted at 18 pt for clarity. The ONIWA menu actions, `⌥ Space` search shortcut and Space-switching behavior are unchanged; hover the menu bar symbol for the ONIWA tooltip.
 
+## Launch at Login (macOS 13+)
+
+From the ONIWA menu bar icon choose **ログイン時に起動 / Launch at Login** to opt in or opt out of starting ONIWA when you log in to your Mac. This uses Apple's `SMAppService.mainApp` API and **does not turn itself on automatically**; the system's registered status is the source of truth, not a stored ONIWA preference.
+
+- A **checkmark** means macOS reports `enabled`; an **unchecked** item means `notRegistered`.
+- If the menu shows **要承認 / approval needed** with a mixed state, macOS has registered ONIWA but needs approval in **System Settings → General → Login Items & Extensions** (wording varies by macOS). Clicking the entry opens that settings panel.
+- If registration fails, ONIWA shows the macOS error and offers to open Login Items settings instead of silently changing the checkmark.
+- The status is refreshed **every time the menu opens**, including after changes made in System Settings.
+- Launch at login starts ONIWA as a quiet menu bar utility; it does not open the search palette automatically.
+
+For reliable real-Mac testing, use a consistently located copy of `ONIWA.app` (for example `/Applications/ONIWA.app` or `~/Applications/ONIWA.app`) rather than registering a temporary build that may be moved or rebuilt. Quit any running ONIWA copy before launching the installed one. Local ad-hoc signing may behave differently from the eventual Developer ID-signed release; verify the login item status and a real sign-out/sign-in cycle. Test **ON → login → OFF → login**, and check that ONIWA does not start after OFF. Do not register a login item during build or installation.
+
 ## First prototype
 
 - **New installations:** `⌥ Option + Space` opens the search palette by default. Existing installations retain their previously selected shortcut until changed. The menu-bar **庭** remains the fallback if a combination is intercepted by macOS.
