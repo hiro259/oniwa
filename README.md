@@ -13,7 +13,7 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 - After the burst it verifies target and unrelated displays' Space IDs and stable UUID/order at 150, 350, 600, 850 and 1200ms. If the destination is wrong, the layout changes, or the state remains uncertain, ONIWA **stops without extra arrows or automatic rollback**.
 - Two-monitor switching is sequential: finish and verify display 1, then switch and verify display 2, followed by a final cross-display readback. This is a single *user action*, not simultaneous macOS events.
 - Ordinary installations **always select 50ms on startup**, including installations that previously saved a gesture/MC/numbered-Desktop experiment mode. No OS shortcut preferences, SIP settings or display settings are changed.
-- The menu shows **切り替え方式：⌃←/→ 高速連打（50ms・標準）**. The earlier Mission Control, synthetic swipe, 100ms burst, numbered Desktop and step-by-step switchers are retained in source for future comparison, but their controls are hidden from normal builds. Developers can compile with the optional Swift define `ONIWA_LEGACY_SWITCHING_UI` to expose the archived menu and saved experimental routing again.
+- The standard switching algorithm is **⌃←/→ rapid 50ms bursts**; its noninteractive status line is intentionally hidden to keep the menu clean. Earlier Mission Control, synthetic swipe, 100ms burst, numbered Desktop and step-by-step switchers are retained in source for future comparison, but their controls are hidden from normal builds. Developers can compile with the optional Swift define `ONIWA_LEGACY_SWITCHING_UI` to expose the archived menu and saved experimental routing again.
 - **Real-Mac evidence (2026-11-01):** all 13 sampled 50ms burst switches and all five sampled paired switches completed and passed the delayed ID checks; jumps up to seven neighboring Spaces were observed. This is promising, **not** a claim of universal reliability.
 - Research log: [Issue #15](https://github.com/hiro259/oniwa/issues/15); ongoing pair feature: [Issue #11](https://github.com/hiro259/oniwa/issues/11); code under [Draft PR #14](https://github.com/hiro259/oniwa/pull/14).
 
@@ -61,6 +61,12 @@ The search palette, Space/tag editor, paired-Space editor, main menu, and normal
 The app does not translate user-authored Space names, tag text, or paired-Space names. It only localizes interface copy. The `macOS Native` theme is the only exposed preset for now; seven older designs remain implemented but hidden. Its selected and hovered row controls, switching engine, search ranking, saved tags, and Space identities are unchanged. New `AppLanguageTests` verify both languages, defaults, and persistence.
 
 Mac manual checks before merge: switch languages with the search palette open and while an editor sheet is visible; check menus, sorting, help, names and tags, font fit, display labels, restart persistence, keyboard/IME, and both visual appearances. Experimental archived switching menus behind `ONIWA_LEGACY_SWITCHING_UI` remain developer-only.
+
+## Menu bar symbol
+
+The menu contains **Spaceを検索… / Search Spaces…**, **ショートカット / Shortcuts**, **背景の透明度 / Background Transparency**, **言語 / Language**, **診断 / Diagnostics**, and **ONIWAを終了 / Quit ONIWA**, with separators between the search, settings, support, and quit groups. **診断 / Diagnostics** contains **ショートカット診断… / Shortcut diagnostics…** and **切り替え診断ログを開く… / Open switching log…**; these still work as before and only their menu placement has changed.
+
+The menu bar shows a **single four-stone symbol** rather than the text `庭`. It is a vector `NSImage` template, so macOS automatically renders the silhouette in the appropriate light/dark foreground color. The fine sand ripples from the full-color app icon are intentionally omitted at 18 pt for clarity. The ONIWA menu actions, `⌥ Space` search shortcut and Space-switching behavior are unchanged; hover the menu bar symbol for the ONIWA tooltip.
 
 ## First prototype
 
@@ -125,7 +131,7 @@ Unit tests in `SpaceLabelsTests.swift` cover persistence, safe deletion, multi-m
 
 **Mitigations:** ONIWA now posts a genuine, button-free mouseMoved after repositioning, checks that the pointer is on the requested display, samples all displays **after each gesture/key step** and aborts on any unrelated display change. Never send a fallback key after an unexpected change. A user moving the pointer to another monitor also aborts the pending keyboard fallback.
 
-**Local diagnostic log:** `~/Library/Logs/ONIWA/switch.log` (rotated, capped at 256 KB). Use menu bar **庭 → 切り替え診断ログを開く…**, or in fish:
+**Local diagnostic log:** `~/Library/Logs/ONIWA/switch.log` (rotated, capped at 256 KB). Use the menu bar's **ONIWA icon → 診断 → 切り替え診断ログを開く…**, or in fish:
 
 ```fish
 tail -n 80 ~/Library/Logs/ONIWA/switch.log
@@ -155,7 +161,7 @@ There is a regression test using the user's exact original and reordered ID arra
 
 The macOS app icon is bundled by `sh build.sh` **before code signing**. Place either `Resources/AppIcon.icns` (preferred) or `Resources/ONIWA-AppIcon.icns` in the repository. If only the ten-image iconset is available, `Resources/AppIcon.iconset/` or `Resources/ONIWA-AppIcon.iconset/` is also supported; the build converts it with macOS `iconutil`. The finished app contains `Contents/Resources/AppIcon.icns` and its generated `Info.plist` declares `CFBundleIconFile`.
 
-If no icon asset is present, source-only CI builds continue without an icon and print a notice. **This means the image itself must still be added to the repository before a distributed release**; the integration script alone does not ship an icon.
+If no icon asset is present, source-only CI builds continue without an icon and print a notice. **The approved `Resources/AppIcon.icns` asset must be Git-tracked for GitHub builds and releases**; the integration script alone does not ship an icon.
 
 For a local check (fish):
 
