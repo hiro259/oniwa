@@ -4,7 +4,7 @@
 
 ONIWA is a free, open-source menu-bar app that makes Apple's **native Mission Control Spaces** searchable. Name your desktops, add search tags, and switch a named pair of Spaces across two displays. ONIWA does not create its own virtual desktop system.
 
-**Latest published release:** [ONIWA v0.1.0](https://github.com/hiro259/oniwa/releases/tag/v0.1.0) — Developer ID-signed and Apple-notarized. This branch prepares **v0.1.1**, which adds guided permission setup for first-time users. Core search, single-Space switching, two-display sets and Sidecar were tested on a real Apple silicon Mac; other hardware and macOS versions remain less tested.
+**Download ONIWA:** [v0.1.1 for macOS (DMG)](https://github.com/hiro259/oniwa/releases/tag/v0.1.1) — Developer ID-signed and Apple-notarized, with drag-to-Applications installation and guided Accessibility setup. [v0.1.0 (ZIP)](https://github.com/hiro259/oniwa/releases/tag/v0.1.0) remains available. v0.1.1 was tested on an Apple silicon Mac, including installation from the browser-downloaded DMG and single-/two-display Space switching; compatibility with other macOS versions and hardware is not fully verified.
 
 ## Demo
 
@@ -27,9 +27,18 @@ Names, tags and sets are saved **locally** on your Mac. No online account is nee
 ## Requirements
 
 - **macOS 13 or later**.
-- For the official download, get [the notarized v0.1.0 ZIP](https://github.com/hiro259/oniwa/releases/tag/v0.1.0) and move ONIWA.app to Applications. **Xcode or Apple Command Line Tools are only needed to build from source.**
+- **Xcode or Apple Command Line Tools are not required for the DMG download.** They are only needed to build ONIWA from source.
 - macOS Mission Control shortcuts **Move left a space / Move right a space** (`Control+←` / `Control+→`) enabled in **System Settings → Keyboard → Keyboard Shortcuts → Mission Control**.
 - **Accessibility / key-event posting permission** for ONIWA when macOS prompts for it. See [Permissions and troubleshooting](#permissions-and-troubleshooting).
+
+## Install ONIWA
+
+1. Download [ONIWA v0.1.1](https://github.com/hiro259/oniwa/releases/tag/v0.1.1) and open `ONIWA-v0.1.1-macos.dmg`.
+2. Drag **ONIWA.app** onto the **Applications** shortcut shown in the disk-image window.
+3. Open **ONIWA** from **Applications**. Allow **Accessibility** when the setup guide appears (System Settings → Privacy & Security → Accessibility); the guide includes a button to open the relevant settings.
+4. If needed, return to ONIWA and choose **Recheck**. You may need to quit and reopen ONIWA after granting permission. The menu-bar app uses `⌥ Option + Space` to open its search palette by default.
+
+To upgrade from v0.1.0, quit the running app before replacing it in Applications. If macOS keeps an older Accessibility approval, remove the old ONIWA entry and enable the newly installed copy.
 
 ## Build and run from source
 
@@ -74,7 +83,7 @@ Existing installations preserve their previously chosen launch shortcut. If `⌥
 ONIWA uses macOS's ordinary Space movement shortcuts to perform switching. It needs both working **`Control+←/→` Mission Control shortcuts** and authorization to post keyboard events.
 
 - **First launch (v0.1.1 and later):** ONIWA checks Accessibility permission and the ability to post keyboard events, but shows only **Accessibility** as a permission to configure. The setup window offers **Open System Settings** and **Recheck** and shows the running app path. **Keyboard event posting: OK** appears only after a successful Space transition; it is not a second permission you must grant. Open the same guide from **Permissions and setup…** in the menu bar.
-- **Install location:** moving ONIWA into **Applications** is recommended, but not required. The planned **v0.1.1 DMG** will show ONIWA and an Applications shortcut side by side: drag ONIWA onto Applications, then launch the installed copy. When ONIWA runs elsewhere, the setup window offers **Show this app in Finder** and **Open Applications**. Quit it before moving; reauthorize Accessibility if macOS still references the old path.
+- **Install location:** the **v0.1.1 DMG** shows ONIWA and an Applications shortcut side by side. Drag ONIWA onto Applications, then launch the installed copy. Installing into Applications is recommended, not strictly required. When ONIWA runs elsewhere, its setup window offers **Show this app in Finder** and **Open Applications**. Quit the app before moving it; reauthorize Accessibility if macOS still references the old path.
 - **A switch is blocked by permissions:** open **System Settings → Privacy & Security → Accessibility**, enable the *specific* `ONIWA.app` you are running, then restart the app if permission remains denied.
 - **The accessibility toggle is enabled but switching still fails:** check for an older `build/ONIWA.app` or `dist/ONIWA.app` entry in Accessibility settings. Remove the stale entry, add the actual installed copy (usually `/Applications/ONIWA.app`), and restart it. The app's permission guide shows its current path. If necessary, see [the app-specific TCC reset procedure](docs/RELEASING.md#permission-troubleshooting-development-vs-distribution-copies).
 - **The palette opens but Spaces do not change:** test physical `Control+←` / `Control+→` and confirm those shortcuts are enabled under Mission Control.
