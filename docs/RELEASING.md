@@ -1,6 +1,6 @@
 # ONIWA v0.1 — Developer ID signing and notarization
 
-**Current status: release workflow prepared, but not yet verified on the owner's Mac or notarized.** Do not upload or advertise a ZIP from the first build as a public release. The app needs real-hardware validation with Hardened Runtime, Apple's acceptance, stapling, and a fresh install test.
+**Status (2026-11-04): Developer ID release candidate was tested on the owner's M4 MacBook Air and accepted by Apple's notarization service.** The accepted ticket was stapled and validated, and a final public ZIP was created and locally extracted/tested. The GitHub Release has **not** been published yet; a fresh installation to Applications and a browser-downloaded/quarantined ZIP test remain release follow-up checks. Never publish the pre-staple notarization-submission ZIP.
 
 This process runs **locally on the owner's Mac**. No signing certificate or notarization credentials are uploaded to the GitHub repository or stored in GitHub Actions.
 
@@ -104,8 +104,40 @@ The public archive is `dist/ONIWA-v0.1.0-macos.zip`, created **after** stapling.
 
 ## 6. Clean-install verification and GitHub Release
 
-Extract the **public** ZIP into a fresh destination, move the app to Applications, and perform normal launch and Accessibility authorization. Confirm the OS accepts the notarization ticket, the app's icon appears, and single/paired Space switching works with its hardened distribution signature.
+Extract the **public** ZIP into a fresh destination, then perform a normal launch and Accessibility authorization. Before/around publication, also test moving it to Applications and launching the downloaded archive with macOS quarantine/Gatekeeper behavior. Confirm the OS accepts the notarization ticket, the app's icon appears, and single/paired Space switching works with its hardened distribution signature.
 
-Only then create the `v0.1.0` tag and GitHub Release with `ONIWA-v0.1.0-macos.zip`, installation instructions, macOS compatibility notes, private SkyLight dependency and known limitations. Homebrew Cask comes after the direct release is stable.
+Create the `v0.1.0` tag and GitHub Release with `ONIWA-v0.1.0-macos.zip`, installation instructions, macOS compatibility notes, private SkyLight dependency and known limitations. After uploading, download the published ZIP and repeat the Gatekeeper/first-run check. Homebrew Cask comes after the direct release is stable.
+
+
+## Verification record — 2026-11-04
+
+- GitHub Actions (macOS build): Swift unit tests, development build, and release-script safety checks passed on PR #26.
+- The Developer ID Application-signed `dist/ONIWA.app` built successfully with Hardened Runtime and a secure timestamp. `codesign --verify --deep --strict` passed.
+- On the owner's M4 MacBook Air, the signed candidate launched and the owner confirmed single-Space switching, Chrome fullscreen Space switching, and two-display Space-set switching with Sidecar.
+- Apple notarization submission returned **Accepted**. The accepted ticket was stapled to `dist/ONIWA.app`; `xcrun stapler validate` and `spctl --assess --type execute -vv` succeeded (`accepted`, `source=Notarized Developer ID`).
+- The final `dist/ONIWA-v0.1.0-macos.zip` was created **after** stapling. It was extracted to a fresh directory under Downloads; `stapler validate` passed; the running process path was confirmed to point to that extracted copy, and the owner confirmed two-display switching worked there.
+- Not yet separately verified: installing that fresh copy into `/Applications`, a **browser-downloaded** ZIP with the macOS quarantine attribute, and compatibility on other macOS versions. Do not present those as already tested.
+
+## Permission troubleshooting: development vs distribution copies
+
+`build/ONIWA.app` and `dist/ONIWA.app` use the same bundle identifier (`com.hiro259.oniwa`) but different signatures/locations. macOS privacy approvals may need to be reapplied when switching between them. **Quit all running ONIWA copies first** to ensure the candidate rather than an already-running development process is launched.
+
+During release validation, Space enumeration and mouse positioning worked, but keyboard injection was blocked with `post-event-access-denied` (the `CGPreflightPostEventAccess()` check was false). After reauthorizing the distribution copy and resetting the app-specific privacy approvals, Space switching worked; the exact combination of approvals that resolved it was not isolated.
+
+If this occurs again, inspect System Settings → Privacy & Security → Accessibility and ensure that the **intended distribution copy** is authorized. If toggling permission and restarting ONIWA does not help, the following app-scoped resets can be used before reauthorizing the app. They can also revoke the development copy's approval:
+
+```fish
+tccutil reset Accessibility com.hiro259.oniwa
+tccutil reset PostEvent com.hiro259.oniwa
+```
+
+Launch the distribution copy and verify the actual executable path, not merely the window title:
+
+```fish
+open dist/ONIWA.app
+ps axww -o command= | grep '[O]NIWA.app/Contents/MacOS/ONIWA'
+```
+
+Do not disable Hardened Runtime or add broad exception entitlements to work around an unverified permissions failure.
 
 **Note:** Notarization checks signatures and malware, not whether ONIWA's private macOS API integrations will continue working on future operating systems. It is separate from Mac App Store review.
