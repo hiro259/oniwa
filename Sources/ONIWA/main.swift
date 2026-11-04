@@ -59,6 +59,8 @@ final class SearchState: ObservableObject {
     private var editingIdentity: SpaceIdentity?
     let switcher = SpaceSwitcher()
     var hidePanel: (() -> Void)?
+    var onPermissionFailure: (() -> Void)?
+    var onVerifiedSpaceSwitch: (() -> Void)?
 
     var all: [SpaceEntry] { groups.flatMap(\.spaces) }
     var results: [SpaceEntry] {
@@ -338,10 +340,11 @@ final class SearchState: ObservableObject {
             + "second=\(SpaceSwitchDiagnostics.shortDisplay(pair.second.displayID)):"
             + "\(String(pair.second.uuid.prefix(8)))"
         )
-        guard resolvedSpaces(for: pair) != nil else {
+        guard let targets = resolvedSpaces(for: pair) else {
             errorMessage = AppLanguage.ui("セットのSpaceが見つかりません。セットを編集してください。", "Set Spaces weren't found. Edit the set.")
             return
         }
+        let requestedMove = !targets.0.isCurrent || !targets.1.isCurrent
         isSwitching = true
         hidePanel?()
         switcher.switchToPair(pair) { [weak self] outcome in
@@ -351,9 +354,9 @@ final class SearchState: ObservableObject {
             case .success:
                 self.listOrder.markUsed(self.pairResultID(pair))
                 self.orderingRevision += 1
+                if requestedMove { self.onVerifiedSpaceSwitch?() }
             case .failure(let error):
-                self.errorMessage = error.localizedDescription
-                self.showError()
+                self.handleSwitchFailure(error)
             }
         }
     }
@@ -505,6 +508,7 @@ final class SearchState: ObservableObject {
             + "space=\(space.systemID) uuid=\(space.identity.uuid.map { String($0.prefix(8)) } ?? "none") "
             + "apps=[\(apps)] selectedID=\(SpaceSwitchDiagnostics.safe(selectedID ?? "none"))"
         )
+        let requestedMove = !space.isCurrent
         isSwitching = true
         hidePanel?()
         switcher.switchTo(space) { [weak self] outcome in
@@ -516,10 +520,22 @@ final class SearchState: ObservableObject {
                     self.listOrder.markUsed(key)
                     self.orderingRevision += 1
                 }
+                if requestedMove { self.onVerifiedSpaceSwitch?() }
             case .failure(let error):
-                self.errorMessage = error.localizedDescription
-                self.showError()
+                self.handleSwitchFailure(error)
             }
+        }
+    }
+
+    private func handleSwitchFailure(_ error: Error) {
+        // A clean Developer ID install can lack keyboard-posting permission even
+        // when an older development app with the same bundle ID was approved.
+        if PermissionSetupController.needsSetup {
+            errorMessage = nil
+            onPermissionFailure?()
+        } else {
+            errorMessage = error.localizedDescription
+            showError()
         }
     }
 
@@ -1297,6 +1313,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var shortcut: GlobalShortcut?
     private var panel: SearchPanel?
     private var statusItem: NSStatusItem?
+    private let permissionSetup = PermissionSetupController()
     private var keyboardMonitor: Any?
     private var spaceEventObserver: SpaceWorkspaceEventObserver?
     private var spaceChangeObserverToken: NSObjectProtocol?
@@ -1365,6 +1382,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildStatusMenu()
         state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
         state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
+        state.onPermissionFailure = { [weak self] in self?.permissionSetup.show() }
+        state.onVerifiedSpaceSwitch = { [weak self] in self?.permissionSetup.recordSuccessfulSwitch() }
+        // Always guide users with missing permissions. For copies launched
+        // outside Applications, explain the recommended move once per path.
+        DispatchQueue.main.async { [weak self] in
+            if PermissionSetupController.shouldShowOnLaunch {
+                self?.permissionSetup.show()
+            }
+        }
     }
 
     /// Rebuild only the status menu; do not re-register shortcuts or observers.
@@ -1376,6 +1402,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         languageItems.removeAll()
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: t("Spaceを検索…", "Search Spaces…"), action: #selector(openPanel), keyEquivalent: ""))
+        let permissionItem = NSMenuItem(
+            title: t("権限と初期設定…", "Permissions and setup…"),
+            action: #selector(openPermissionSetup),
+            keyEquivalent: "")
+        permissionItem.target = self
+        menu.addItem(permissionItem)
         menu.addItem(NSMenuItem.separator())
         let shortcutRoot = NSMenuItem(title: t("ショートカット", "Shortcuts"), action: nil, keyEquivalent: "")
         let shortcutMenu = NSMenu(title: t("ショートカット", "Shortcuts"))
@@ -2112,6 +2144,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Refresh when the user returns from System Settings, as well as when
+        // they explicitly click the Recheck button.
+        permissionSetup.refreshIfVisible()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         if let spaceChangeObserverToken {
             NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserverToken)
@@ -2127,6 +2165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    @objc private func openPermissionSetup() { permissionSetup.show() }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func openPanel() { presentPanel() }
 
