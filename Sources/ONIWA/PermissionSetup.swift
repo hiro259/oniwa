@@ -36,6 +36,16 @@ final class PermissionSetupController: NSObject, NSWindowDelegate {
         !AXIsProcessTrusted() || !CGPreflightPostEventAccess()
     }
 
+    private static let lastInstallNoticePathKey = "oniwa.permission.installNoticePath"
+
+    /// Show once for a non-Applications copy even if it was already authorized.
+    /// This avoids forcing users to discover the recommended install location.
+    static var shouldShowOnLaunch: Bool {
+        needsSetup || (!isInApplications
+            && UserDefaults.standard.string(forKey: lastInstallNoticePathKey)
+                != Bundle.main.bundlePath)
+    }
+
     /// An app launched from Downloads/build is more likely to be replaced or
     /// confused with an old copy in macOS Privacy & Security settings.
     static var isInApplications: Bool {
@@ -52,6 +62,10 @@ final class PermissionSetupController: NSObject, NSWindowDelegate {
 
     func show() {
         model.refresh()
+        if !Self.isInApplications {
+            UserDefaults.standard.set(Bundle.main.bundlePath,
+                                      forKey: Self.lastInstallNoticePathKey)
+        }
         if let window {
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
