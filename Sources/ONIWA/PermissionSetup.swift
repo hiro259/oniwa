@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import SwiftUI
+import ONIWACore
 
 /// The Accessibility and Core Graphics posting checks are intentionally separate.
 /// A macOS privacy row can appear enabled while keyboard-event posting is still denied,
