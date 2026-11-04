@@ -60,6 +60,7 @@ final class SearchState: ObservableObject {
     let switcher = SpaceSwitcher()
     var hidePanel: (() -> Void)?
     var onPermissionFailure: (() -> Void)?
+    var onVerifiedSpaceSwitch: (() -> Void)?
 
     var all: [SpaceEntry] { groups.flatMap(\.spaces) }
     var results: [SpaceEntry] {
@@ -339,10 +340,11 @@ final class SearchState: ObservableObject {
             + "second=\(SpaceSwitchDiagnostics.shortDisplay(pair.second.displayID)):"
             + "\(String(pair.second.uuid.prefix(8)))"
         )
-        guard resolvedSpaces(for: pair) != nil else {
+        guard let targets = resolvedSpaces(for: pair) else {
             errorMessage = AppLanguage.ui("セットのSpaceが見つかりません。セットを編集してください。", "Set Spaces weren't found. Edit the set.")
             return
         }
+        let requestedMove = !targets.0.isCurrent || !targets.1.isCurrent
         isSwitching = true
         hidePanel?()
         switcher.switchToPair(pair) { [weak self] outcome in
@@ -352,6 +354,7 @@ final class SearchState: ObservableObject {
             case .success:
                 self.listOrder.markUsed(self.pairResultID(pair))
                 self.orderingRevision += 1
+                if requestedMove { self.onVerifiedSpaceSwitch?() }
             case .failure(let error):
                 self.handleSwitchFailure(error)
             }
@@ -505,6 +508,7 @@ final class SearchState: ObservableObject {
             + "space=\(space.systemID) uuid=\(space.identity.uuid.map { String($0.prefix(8)) } ?? "none") "
             + "apps=[\(apps)] selectedID=\(SpaceSwitchDiagnostics.safe(selectedID ?? "none"))"
         )
+        let requestedMove = !space.isCurrent
         isSwitching = true
         hidePanel?()
         switcher.switchTo(space) { [weak self] outcome in
@@ -516,6 +520,7 @@ final class SearchState: ObservableObject {
                     self.listOrder.markUsed(key)
                     self.orderingRevision += 1
                 }
+                if requestedMove { self.onVerifiedSpaceSwitch?() }
             case .failure(let error):
                 self.handleSwitchFailure(error)
             }
@@ -1378,6 +1383,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
         state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
         state.onPermissionFailure = { [weak self] in self?.permissionSetup.show() }
+        state.onVerifiedSpaceSwitch = { [weak self] in self?.permissionSetup.recordSuccessfulSwitch() }
         // Keep launch silent for users whose installed copy already has access.
         // Otherwise explain exactly which macOS permission is missing.
         DispatchQueue.main.async { [weak self] in
