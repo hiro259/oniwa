@@ -70,13 +70,13 @@ for candidate in Resources/AppIcon.icns Resources/ONIWA-AppIcon.icns; do
 done
 
 if [ -n "$ICON_SOURCE" ]; then
-    mkdir -p build/ONIWA.app/Contents/Resources
+    mkdir -p "$APP_PATH/Contents/Resources"
     cp "$ICON_SOURCE" "$ICON_OUTPUT"
     echo "Bundled ONIWA icon from $ICON_SOURCE"
 else
     for candidate in Resources/AppIcon.iconset Resources/ONIWA-AppIcon.iconset; do
         if [ -d "$candidate" ]; then
-            mkdir -p build/ONIWA.app/Contents/Resources
+            mkdir -p "$APP_PATH/Contents/Resources"
             iconutil -c icns "$candidate" -o "$ICON_OUTPUT"
             echo "Created ONIWA icon from $candidate"
             break
