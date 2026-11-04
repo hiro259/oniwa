@@ -1384,10 +1384,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
         state.onPermissionFailure = { [weak self] in self?.permissionSetup.show() }
         state.onVerifiedSpaceSwitch = { [weak self] in self?.permissionSetup.recordSuccessfulSwitch() }
-        // Keep launch silent for users whose installed copy already has access.
-        // Otherwise explain exactly which macOS permission is missing.
+        // Always guide users with missing permissions. For copies launched
+        // outside Applications, explain the recommended move once per path.
         DispatchQueue.main.async { [weak self] in
-            if PermissionSetupController.needsSetup {
+            if PermissionSetupController.shouldShowOnLaunch {
                 self?.permissionSetup.show()
             }
         }
