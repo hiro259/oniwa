@@ -14,6 +14,12 @@ jobs:
         run: |
           sh -n build.sh
           sh -n scripts/build-release.sh
+          sh -n scripts/build-dmg.sh
+          if env -u ONIWA_DEVELOPER_ID_IDENTITY sh scripts/build-dmg.sh > /tmp/oniwa-dmg-preflight.log 2>&1; then
+            echo "ERROR: DMG build unexpectedly accepted a missing signing identity"
+            exit 1
+          fi
+          grep -q "ONIWA_DEVELOPER_ID_IDENTITY" /tmp/oniwa-dmg-preflight.log
           if env -u ONIWA_DEVELOPER_ID_IDENTITY sh scripts/build-release.sh > /tmp/oniwa-release-preflight.log 2>&1; then
             echo "ERROR: Release build unexpectedly accepted a missing signing identity"
             exit 1
