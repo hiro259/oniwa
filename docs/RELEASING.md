@@ -43,6 +43,8 @@ The candidate signature uses `codesign --options runtime --timestamp` with the D
 
 ## 3. Real-Mac validation — before notarization
 
+**Quit the currently running development ONIWA from its menu first.** Both apps have the same bundle identifier, so opening the distribution candidate while the development app is running may activate the old process instead of testing the newly signed app.
+
 Run the **distribution** candidate, not `build/ONIWA.app`:
 
 ```fish
