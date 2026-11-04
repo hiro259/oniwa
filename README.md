@@ -92,6 +92,7 @@ See [Development notes](docs/DEVELOPMENT.md) for deeper diagnostics, signing det
 ## Development and release
 
 - [Implementation details, diagnostics and historical research](docs/DEVELOPMENT.md)
+- [Developer ID signing, notarization and v0.1 release steps](docs/RELEASING.md)
 - [v0.1 release-preparation tracker](https://github.com/hiro259/oniwa/issues/6)
 - [Third-party licenses and notices](THIRD_PARTY_NOTICES.md)
 

@@ -10,6 +10,15 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Validate signing script safety
+        run: |
+          sh -n build.sh
+          sh -n scripts/build-release.sh
+          if env -u ONIWA_DEVELOPER_ID_IDENTITY sh scripts/build-release.sh > /tmp/oniwa-release-preflight.log 2>&1; then
+            echo "ERROR: Release build unexpectedly accepted a missing signing identity"
+            exit 1
+          fi
+          grep -q "ONIWA_DEVELOPER_ID_IDENTITY" /tmp/oniwa-release-preflight.log
       - name: Swift unit tests
         run: swift test
       - name: Build macOS app

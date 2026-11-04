@@ -23,7 +23,7 @@ codesign -dv --verbose=2 build/ONIWA.app 2>&1
 open build/ONIWA.app
 ```
 
-The placeholder is not a valid identity; `build.sh` rejects missing and malformed certificate identifiers. The value identifies an installed signing certificate, not its private key. Never commit a certificate, private key or notarization credential. Apple Development signing is **not** equivalent to a Developer ID distribution signature. The current script signs with `--timestamp=none` and is for **local testing**, not a notarized public release. See [release preparation, Issue #6](https://github.com/hiro259/oniwa/issues/6).
+The placeholder is not a valid identity; `build.sh` rejects missing and malformed certificate identifiers. The value identifies an installed signing certificate, not its private key. Never commit a certificate, private key or notarization credential. Apple Development signing is **not** equivalent to a Developer ID distribution signature. The current script signs with `--timestamp=none` and is for **local testing**, not a notarized public release. See [release preparation, Issue #6](https://github.com/hiro259/oniwa/issues/6) and the separate [distribution build / notarization guide](RELEASING.md).
 
 To verify the bundled icon in a local build:
 

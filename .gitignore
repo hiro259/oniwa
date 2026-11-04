@@ -1,6 +1,11 @@
 .DS_Store
 .build/
 build/
+dist/
+# Developer ID keys and certificate exports must never be committed.
+*.p12
+*.p8
+*.certSigningRequest
 DerivedData/
 .swiftpm/
 *.xcuserstate
