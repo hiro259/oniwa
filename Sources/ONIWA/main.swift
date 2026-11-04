@@ -1149,6 +1149,8 @@ struct SearchView: View {
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Text(t("⌘S で保存 · Esc でキャンセル", "⌘S Save · Esc Cancel"))
+                    .font(.caption2).foregroundStyle(.secondary)
                 HStack {
                     if state.hasEditingLabel {
                         Button(t("名前とタグを削除", "Remove name and tags")) { state.deleteLabel() }
@@ -1157,8 +1159,13 @@ struct SearchView: View {
                     }
                     Spacer()
                     Button(t("キャンセル", "Cancel")) { state.cancelEdit() }
+                        .keyboardShortcut(.cancelAction)
                         .modifier(NativeSheetActionStyle(enabled: design == .macOSNative))
+                    // Return in the tag field must keep adding tags, not save
+                    // the sheet. Command-S works from either text field.
                     Button(t("保存", "Save")) { state.saveLabel() }
+                        .keyboardShortcut("s", modifiers: .command)
+                        .help(t("⌘S で保存", "Save with ⌘S"))
                         .modifier(NativeSheetActionStyle(
                             enabled: design == .macOSNative, prominent: true))
                 }
@@ -1203,6 +1210,8 @@ struct SearchView: View {
                         .font(.caption).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Text(t("⌘S で保存 · Esc でキャンセル", "⌘S Save · Esc Cancel"))
+                    .font(.caption2).foregroundStyle(.secondary)
                 HStack {
                     if state.editingPairID != nil {
                         Button(t("セットを削除", "Delete set"), role: .destructive) { state.deletePair() }
@@ -1210,8 +1219,11 @@ struct SearchView: View {
                     }
                     Spacer()
                     Button(t("キャンセル", "Cancel")) { state.pairEditing = false }
+                        .keyboardShortcut(.cancelAction)
                         .modifier(NativeSheetActionStyle(enabled: design == .macOSNative))
                     Button(t("保存", "Save")) { state.savePair() }
+                        .keyboardShortcut("s", modifiers: .command)
+                        .help(t("⌘S で保存", "Save with ⌘S"))
                         .disabled(!state.pairCanSave)
                         .modifier(NativeSheetActionStyle(
                             enabled: design == .macOSNative, prominent: true))
