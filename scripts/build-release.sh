@@ -11,6 +11,16 @@ if [ -z "$IDENTITY" ]; then
     exit 2
 fi
 
+# Refuse an invalid identifier BEFORE deleting any previous distribution
+# candidate. The underlying build additionally checks the certificate type.
+case "$IDENTITY" in
+    *[!0-9a-fA-F]*) echo "ERROR: Developer ID SHA-1 must be hexadecimal." >&2; exit 2 ;;
+esac
+if [ "${#IDENTITY}" -ne 40 ]; then
+    echo "ERROR: Developer ID Application SHA-1 must contain 40 digits." >&2
+    exit 2
+fi
+
 # Restrict cleanup to generated distribution artifacts; development's
 # build/ONIWA.app is never deleted or re-signed by this script.
 mkdir -p dist
