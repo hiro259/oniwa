@@ -4,7 +4,7 @@
 
 ONIWA is a free, open-source menu-bar app that makes Apple's **native Mission Control Spaces** searchable. Name your desktops, add search tags, and switch a named pair of Spaces across two displays. ONIWA does not create its own virtual desktop system.
 
-**Release status:** v0.1.0 is being prepared. The `main` branch can be built from source, but a **Developer ID-signed, Apple-notarized public download is not available yet**. The core search, single-Space switching, two-display sets and Sidecar workflow have been tested on a real Apple silicon Mac; behavior on other macOS versions and hardware still needs testing.
+**Latest published release:** [ONIWA v0.1.0](https://github.com/hiro259/oniwa/releases/tag/v0.1.0) — Developer ID-signed and Apple-notarized. This branch prepares **v0.1.1**, which adds guided permission setup for first-time users. Core search, single-Space switching, two-display sets and Sidecar were tested on a real Apple silicon Mac; other hardware and macOS versions remain less tested.
 
 ## Demo
 
@@ -27,13 +27,13 @@ Names, tags and sets are saved **locally** on your Mac. No online account is nee
 ## Requirements
 
 - **macOS 13 or later**.
-- **Xcode or Apple Command Line Tools** to build from source.
+- For the official download, get [the notarized v0.1.0 ZIP](https://github.com/hiro259/oniwa/releases/tag/v0.1.0) and move ONIWA.app to Applications. **Xcode or Apple Command Line Tools are only needed to build from source.**
 - macOS Mission Control shortcuts **Move left a space / Move right a space** (`Control+←` / `Control+→`) enabled in **System Settings → Keyboard → Keyboard Shortcuts → Mission Control**.
 - **Accessibility / key-event posting permission** for ONIWA when macOS prompts for it. See [Permissions and troubleshooting](#permissions-and-troubleshooting).
 
 ## Build and run from source
 
-Until the notarized release is available, build ONIWA locally:
+To build ONIWA locally from source instead of installing the signed release:
 
 ```sh
 git clone https://github.com/hiro259/oniwa.git
@@ -73,8 +73,9 @@ Existing installations preserve their previously chosen launch shortcut. If `⌥
 
 ONIWA uses macOS's ordinary Space movement shortcuts to perform switching. It needs both working **`Control+←/→` Mission Control shortcuts** and authorization to post keyboard events.
 
-- **A switch is blocked by permissions:** open **System Settings → Privacy & Security → Accessibility**, enable the specific `ONIWA.app` you are running, then restart the app.
-- **The accessibility toggle is enabled but switching still fails after rebuilding:** verify the app path and code-signing identity. Ad-hoc development builds can require reauthorization.
+- **First launch (v0.1.1 and later):** ONIWA checks permission for Accessibility and keyboard event posting. If needed, a setup window explains the permission, offers **Open System Settings** and **Recheck**, and shows the path of the running app. The same guide is available from the menu-bar item **Permissions and setup…**.
+- **A switch is blocked by permissions:** open **System Settings → Privacy & Security → Accessibility**, enable the *specific* `ONIWA.app` you are running, then restart the app if permission remains denied.
+- **The accessibility toggle is enabled but switching still fails:** check for an older `build/ONIWA.app` or `dist/ONIWA.app` entry in Accessibility settings. Remove the stale entry, add the actual installed copy (usually `/Applications/ONIWA.app`), and restart it. The app's permission guide shows its current path. If necessary, see [the app-specific TCC reset procedure](docs/RELEASING.md#permission-troubleshooting-development-vs-distribution-copies).
 - **The palette opens but Spaces do not change:** test physical `Control+←` / `Control+→` and confirm those shortcuts are enabled under Mission Control.
 - **A switch goes to an unexpected Space:** use **Diagnostics / 診断 → Open switching log… / 切り替え診断ログを開く…**. Logs are stored at `~/Library/Logs/ONIWA/switch.log`. **Review or redact names and application information before sharing a log.**
 
