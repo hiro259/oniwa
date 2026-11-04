@@ -3,6 +3,14 @@
 Free, open-source macOS Spaces switcher with custom names and fuzzy search.
 ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual desktop engine.
 
+## Demo
+
+### Dual-display Space switching
+
+Switch Spaces across two displays with a single action.
+
+![ONIWA dual-display Space switching](oniwa-dual-display-demo.gif)
+
 **Status: working prototype on `main` (Issue #1).** Search, names, shortcut handling, instant Space switching and switching between two displays have been verified on a real Mac. Sidecar, display reconnection and more complex fullscreen cases still need additional checks.
 
 ## Default Space switching on the `feat/issue-11-space-pairs` branch
