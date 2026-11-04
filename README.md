@@ -76,6 +76,16 @@ The menu contains **Spaceを検索… / Search Spaces…**, **ショートカッ
 
 The menu bar shows a **single four-stone symbol** rather than the text `庭`. It is a vector `NSImage` template, so macOS automatically renders the silhouette in the appropriate light/dark foreground color. The fine sand ripples from the full-color app icon are intentionally omitted at 18 pt for clarity. The ONIWA menu actions, `⌥ Space` search shortcut and Space-switching behavior are unchanged; hover the menu bar symbol for the ONIWA tooltip.
 
+## Search palette display selection
+
+From the ONIWA menu choose **検索パレットの表示先 / Search palette display**. The default is **Mac本体のディスプレイ / Built-in display** (or the primary display on Macs without an internal screen). Choose a connected external display, including Sidecar, to pin the search palette there. The choice is saved locally and used each time the palette opens, regardless of where the mouse cursor is.
+
+The menu uses macOS display UUIDs instead of transient numeric display IDs or position/order, so two monitors with the same name are not confused when their arrangement changes. While a selected display is disconnected, ONIWA **temporarily shows the palette on the built-in display** (or the current primary display). The saved selection is preserved, and the palette returns to it after that same display reconnects. If macOS assigns a different identity to a recreated Sidecar session, choose that display again. The menu refreshes after macOS display-configuration changes.
+
+This preference only controls **where ONIWA's search palette appears**. It does not change the target display for Space switching or move app windows.
+
+**Real-Mac verification before release:** select the built-in Mac screen, an external monitor, and Sidecar in turn; invoke the shortcut with the mouse on either screen; disconnect and reconnect the selected screen; confirm the palette stays visible on the fallback screen and reappears on the selected one after reconnection; change display arrangement, switch macOS language, and relaunch ONIWA to verify the saved choice.
+
 ## First prototype
 
 - **New installations:** `⌥ Option + Space` opens the search palette by default. Existing installations retain their previously selected shortcut until changed. The menu-bar **庭** remains the fallback if a combination is intercepted by macOS.
