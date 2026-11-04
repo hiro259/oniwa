@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
 import Carbon.HIToolbox
@@ -1292,7 +1293,7 @@ final class SearchPanel: NSPanel {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let state = SearchState()
     private var shortcut: GlobalShortcut?
     private var panel: SearchPanel?
@@ -1316,6 +1317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var paletteDesignItems: [PaletteDesign: NSMenuItem] = [:]
     private var languageItems: [AppLanguage: NSMenuItem] = [:]
     private var transparencyMenuRoot: NSMenuItem?
+    private var launchAtLoginMenuItem: NSMenuItem?
 
     private var language: AppLanguage { AppLanguage.selected() }
     private func t(_ ja: String, _ en: String) -> String { language.text(ja, en) }
@@ -1360,6 +1362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         paletteDesignItems.removeAll()
         languageItems.removeAll()
         let menu = NSMenu()
+        menu.delegate = self
         menu.addItem(NSMenuItem(title: t("Spaceを検索…", "Search Spaces…"), action: #selector(openPanel), keyEquivalent: ""))
         menu.addItem(NSMenuItem.separator())
         let shortcutRoot = NSMenuItem(title: t("ショートカット", "Shortcuts"), action: nil, keyEquivalent: "")
@@ -1453,6 +1456,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         languageRoot.submenu = languageMenu
         menu.addItem(languageRoot)
+
+        menu.addItem(NSMenuItem.separator())
+        let launchAtLogin = NSMenuItem(
+            title: t("ログイン時に起動", "Launch at Login"),
+            action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        launchAtLogin.target = self
+        launchAtLoginMenuItem = launchAtLogin
+        menu.addItem(launchAtLogin)
+        refreshLaunchAtLoginMenu()
 
         #if ONIWA_LEGACY_SWITCHING_UI
         menu.addItem(NSMenuItem.separator())
@@ -1650,6 +1662,91 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: t("ONIWAを終了", "Quit ONIWA"), action: #selector(quit), keyEquivalent: "q"))
         for item in menu.items { item.target = self }
         item.menu = menu
+    }
+
+    // Read the system state whenever the menu opens: users can also change
+    // Login Items externally in macOS System Settings.
+    func menuWillOpen(_ menu: NSMenu) {
+        guard menu === statusItem?.menu else { return }
+        refreshLaunchAtLoginMenu()
+    }
+
+    private func refreshLaunchAtLoginMenu() {
+        guard let menuItem = launchAtLoginMenuItem else { return }
+        menuItem.isEnabled = true
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            menuItem.title = t("ログイン時に起動", "Launch at Login")
+            menuItem.state = .on
+            menuItem.toolTip = t("ログイン時にONIWAが自動起動します。", "ONIWA launches automatically at login.")
+        case .notRegistered:
+            menuItem.title = t("ログイン時に起動", "Launch at Login")
+            menuItem.state = .off
+            menuItem.toolTip = t("クリックしてログイン時の起動を有効にします。", "Click to enable launching at login.")
+        case .requiresApproval:
+            menuItem.title = t("ログイン時に起動（要承認）", "Launch at Login (approval needed)")
+            menuItem.state = .mixed
+            menuItem.toolTip = t("macOSのログイン項目設定で承認してください。", "Approve ONIWA in macOS Login Items settings.")
+        case .notFound:
+            menuItem.title = t("ログイン時に起動（利用不可）", "Launch at Login (unavailable)")
+            menuItem.state = .off
+            menuItem.isEnabled = false
+            menuItem.toolTip = t("macOSがONIWAの登録対象を見つけられません。", "macOS cannot find ONIWA's login item registration.")
+        @unknown default:
+            menuItem.title = t("ログイン時に起動（利用不可）", "Launch at Login (unavailable)")
+            menuItem.state = .off
+            menuItem.isEnabled = false
+        }
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        let service = SMAppService.mainApp
+        do {
+            switch service.status {
+            case .enabled:
+                try service.unregister()
+            case .notRegistered:
+                // Never opt in automatically: only a user menu action can register.
+                try service.register()
+            case .requiresApproval:
+                // The entry already exists; its status needs user approval.
+                SMAppService.openSystemSettingsLoginItems()
+                return
+            case .notFound:
+                refreshLaunchAtLoginMenu()
+                return
+            @unknown default:
+                refreshLaunchAtLoginMenu()
+                return
+            }
+        } catch {
+            refreshLaunchAtLoginMenu()
+            showLaunchAtLoginAlert(
+                title: t("ログイン時の起動を変更できませんでした", "Could not change Launch at Login"),
+                message: t("macOSのログイン項目設定を確認してください。", "Check macOS Login Items settings.")
+                    + "\n\n" + error.localizedDescription)
+            return
+        }
+
+        refreshLaunchAtLoginMenu()
+        if service.status == .requiresApproval {
+            showLaunchAtLoginAlert(
+                title: t("ログイン時の起動には承認が必要です", "Launch at Login requires approval"),
+                message: t("macOSのログイン項目設定でONIWAを許可すると有効になります。",
+                           "Allow ONIWA in macOS Login Items settings to enable it."))
+        }
+    }
+
+    private func showLaunchAtLoginAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: t("設定を開く", "Open Settings"))
+        alert.addButton(withTitle: t("閉じる", "Close"))
+        if alert.runModal() == .alertFirstButtonReturn {
+            SMAppService.openSystemSettingsLoginItems()
+        }
     }
 
     @objc private func resetGlassTransparency() {
