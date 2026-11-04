@@ -1300,6 +1300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var keyboardMonitor: Any?
     private var spaceEventObserver: SpaceWorkspaceEventObserver?
     private var spaceChangeObserverToken: NSObjectProtocol?
+    private var screenParametersObserverToken: NSObjectProtocol?
     private var singleSwitchItems: [SingleSpaceSwitchMode: NSMenuItem] = [:]
     private var pairSwitchItems: [PairSpaceSwitchMode: NSMenuItem] = [:]
     private var singleSwitchRootItem: NSMenuItem?
@@ -1333,6 +1334,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Observe system-initiated Mission Control / keyboard switches too.
             // Do not infer recency from search opening alone.
             DispatchQueue.main.async { self?.state.observeCurrentSpaces() }
+        }
+        screenParametersObserverToken = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            // Refresh the list on hotplug/unplug and keep an open palette on
+            // the preferred (or safe fallback) display.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.rebuildStatusMenu()
+                if self.panel?.isVisible == true {
+                    self.positionPaletteOnPreferredDisplay()
+                }
+            }
         }
         installKeyboardNavigation()
         let shortcut = GlobalShortcut()
@@ -1382,6 +1397,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shortcutMenu.addItem(recorderItem)
         shortcutRoot.submenu = shortcutMenu
         menu.addItem(shortcutRoot)
+
+        // Selecting a screen pins the search palette there, regardless of
+        // where the pointer was moved by the Space switcher.
+        let displayRoot = NSMenuItem(
+            title: t("検索パレットの表示先", "Search palette display"),
+            action: nil, keyEquivalent: "")
+        let displayMenu = NSMenu(title: t("検索パレットの表示先", "Search palette display"))
+        let availableScreens = PaletteDisplayScreens.connected()
+        let preference = PaletteDisplaySelection(
+            storedValue: UserDefaults.standard.string(forKey: PaletteDisplaySelection.settingsKey))
+        let builtInAvailable = availableScreens.contains(where: \.isBuiltIn)
+        let builtinItem = NSMenuItem(
+            title: builtInAvailable
+                ? t("Mac本体のディスプレイ（標準）", "Built-in display (default)")
+                : t("メインディスプレイ（標準）", "Primary display (default)"),
+            action: #selector(selectPaletteDisplay(_:)), keyEquivalent: "")
+        builtinItem.representedObject = PaletteDisplaySelection.builtInValue
+        builtinItem.state = preference.preferredDisplayUUID == nil ? .on : .off
+        builtinItem.target = self
+        displayMenu.addItem(builtinItem)
+        if availableScreens.contains(where: { !$0.isBuiltIn }) {
+            displayMenu.addItem(NSMenuItem.separator())
+        }
+        for (index, display) in availableScreens.enumerated() where !display.isBuiltIn {
+            let entry = NSMenuItem(
+                title: "\(display.name) · \(index + 1)",
+                action: #selector(selectPaletteDisplay(_:)), keyEquivalent: "")
+            entry.representedObject = PaletteDisplaySelection(
+                displayUUID: display.uuid).storedValue
+            entry.state = preference.preferredDisplayUUID == display.uuid ? .on : .off
+            entry.target = self
+            displayMenu.addItem(entry)
+        }
+        if let preferred = preference.preferredDisplayUUID,
+           !availableScreens.contains(where: { $0.uuid == preferred }) {
+            displayMenu.addItem(NSMenuItem.separator())
+            let unavailable = NSMenuItem(
+                title: t("選択した画面は未接続（Mac側に一時表示）",
+                         "Selected display disconnected (using Mac temporarily)"),
+                action: nil, keyEquivalent: "")
+            unavailable.isEnabled = false
+            unavailable.state = .on
+            displayMenu.addItem(unavailable)
+        }
+        displayRoot.submenu = displayMenu
+        menu.addItem(displayRoot)
         // The standard 50ms Control+Arrow Space switcher is unchanged.
         // Omit its noninteractive status row from the everyday menu.
 
@@ -1654,6 +1715,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func resetGlassTransparency() {
         GlassTransparencySettings.persist(GlassTransparencySettings.defaultPercent)
+    }
+
+    @objc private func selectPaletteDisplay(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String else { return }
+        let selection = PaletteDisplaySelection(storedValue: raw)
+        // A monitor may be disconnected between opening the menu and clicking.
+        if let id = selection.preferredDisplayUUID,
+           !PaletteDisplayScreens.connected().contains(where: { $0.uuid == id }) {
+            return
+        }
+        UserDefaults.standard.set(selection.storedValue,
+                                  forKey: PaletteDisplaySelection.settingsKey)
+        if panel?.isVisible == true { positionPaletteOnPreferredDisplay() }
+        // Rebuild only after the tracked menu closes.
+        DispatchQueue.main.async { [weak self] in self?.rebuildStatusMenu() }
+    }
+
+    private func positionPaletteOnPreferredDisplay() {
+        guard let panel else { return }
+        let preference = PaletteDisplaySelection(
+            storedValue: UserDefaults.standard.string(forKey: PaletteDisplaySelection.settingsKey))
+        guard let screen = PaletteDisplayScreens.resolve(preference) else { return }
+        // Center in the usable region, not the full screen behind the Dock or
+        // menu bar. Clamp in case a display has an unusually small resolution.
+        let available = screen.visibleFrame
+        let width = panel.frame.width
+        let height = panel.frame.height
+        let x = max(available.minX, min(available.midX - width / 2, available.maxX - width))
+        let y = max(available.minY, min(available.midY - height / 2, available.maxY - height))
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
     @objc private func followSystemLanguage() {
@@ -1947,7 +2038,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         applyPaletteWindowStyle(choice)
         panel?.setContentSize(NSSize(width: choice.panelSize.width,
                                      height: choice.panelSize.height))
-        if panel?.isVisible == true { panel?.center() }
+        if panel?.isVisible == true { positionPaletteOnPreferredDisplay() }
     }
 
     @objc private func openSwitchLog() {
@@ -2026,6 +2117,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSWorkspace.shared.notificationCenter.removeObserver(spaceChangeObserverToken)
             self.spaceChangeObserverToken = nil
         }
+        if let screenParametersObserverToken {
+            NotificationCenter.default.removeObserver(screenParametersObserverToken)
+            self.screenParametersObserverToken = nil
+        }
         if let keyboardMonitor {
             NSEvent.removeMonitor(keyboardMonitor)
             self.keyboardMonitor = nil
@@ -2059,7 +2154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel = window
             applyPaletteWindowStyle(PaletteDesign.active())
         }
-        panel?.center()
+        positionPaletteOnPreferredDisplay()
         NSApp.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
     }
