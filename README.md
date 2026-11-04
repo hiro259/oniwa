@@ -9,7 +9,7 @@ ONIWA uses **native macOS Mission Control Spaces**, not a separate virtual deskt
 
 Switch Spaces across two displays with a single action.
 
-![ONIWA dual-display Space switching](oniwa-dual-display-demo.gif)
+<img width="1400" height="454" alt="image" src="https://github.com/user-attachments/assets/78eb7546-358a-4bce-af98-6ca802c2ccbf" />
 
 **Status: working prototype on `main` (Issue #1).** Search, names, shortcut handling, instant Space switching and switching between two displays have been verified on a real Mac. Sidecar, display reconnection and more complex fullscreen cases still need additional checks.
 
