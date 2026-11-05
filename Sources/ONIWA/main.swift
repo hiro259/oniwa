@@ -1058,7 +1058,12 @@ struct SearchView: View {
                     .buttonStyle(.borderless)
             }
         }
-        .padding(design.contentPadding)
+        // The native panel already uses .fullSizeContentView. Reclaim the
+        // otherwise unused titlebar safe-area inset instead of shrinking rows.
+        // Leave a small top margin so the header doesn't touch the window edge.
+        .padding(.horizontal, design.contentPadding)
+        .padding(.bottom, design.contentPadding)
+        .padding(.top, design == .macOSNative ? 14 : design.contentPadding)
         // The window owns the height. Avoid clipping the results when the
         // selected display is smaller than the preferred six-row palette.
         .frame(width: design.panelSize.width)
@@ -1072,6 +1077,7 @@ struct SearchView: View {
                 design.canvasColor
             }
         }
+        .ignoresSafeArea(.container, edges: design == .macOSNative ? .top : [])
         .onAppear { isSearchFocused = true }
         .onChange(of: paletteRaw) { _ in
             // The text field is replaced when changing between legacy/refined
