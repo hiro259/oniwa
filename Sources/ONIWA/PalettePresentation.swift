@@ -16,7 +16,8 @@ extension PaletteDesign {
         case .monitorFocus: return CGSize(width: 560, height: 490)
         case .modernPrecision: return CGSize(width: 555, height: 490)
         case .pureMonochrome: return CGSize(width: 510, height: 455)
-        case .macOSNative: return CGSize(width: 535, height: 465)
+        // About six normal search rows while keeping the original 535pt width.
+        case .macOSNative: return CGSize(width: 535, height: 620)
         }
     }
 
