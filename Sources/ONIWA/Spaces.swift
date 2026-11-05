@@ -134,9 +134,8 @@ final class SpaceReader {
             }
         }
         return owners.mapValues { perSpace in
-            perSpace.values.sorted {
-                $0.name.localizedStandardCompare($1.name) == .orderedAscending
-            }
+            // Match the previous name-only reader's ordering exactly.
+            perSpace.values.sorted { $0.name < $1.name }
         }
     }
 
