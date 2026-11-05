@@ -4,7 +4,7 @@
 
 ONIWA is a free, open-source menu-bar app that makes Apple's **native Mission Control Spaces** searchable. Name your desktops, add search tags, and switch a named pair of Spaces across two displays. ONIWA does not create its own virtual desktop system.
 
-**Download ONIWA:** [v0.1.1 for macOS (DMG)](https://github.com/hiro259/oniwa/releases/tag/v0.1.1) — Developer ID-signed and Apple-notarized, with drag-to-Applications installation and guided Accessibility setup. [v0.1.0 (ZIP)](https://github.com/hiro259/oniwa/releases/tag/v0.1.0) remains available. v0.1.1 was tested on an Apple silicon Mac, including installation from the browser-downloaded DMG and single-/two-display Space switching; compatibility with other macOS versions and hardware is not fully verified.
+**Download ONIWA:** [v0.1.2 for macOS (DMG)](https://github.com/hiro259/oniwa/releases/tag/v0.1.2) — Developer ID-signed and Apple-notarized, with drag-to-Applications installation and guided Accessibility setup. Previous versions remain available in [Releases](https://github.com/hiro259/oniwa/releases). v0.1.2 was tested on an Apple silicon Mac, including a browser-downloaded DMG with Gatekeeper, single-/two-display Space switching, app-icon display and the six-row search palette; compatibility with other macOS versions and hardware is not fully verified.
 
 ## Demo
 
@@ -20,7 +20,8 @@ ONIWA is a free, open-source menu-bar app that makes Apple's **native Mission Co
 - **Two-display sets:** save one Space from each of two displays under a shared name and switch to the pair with a single command.
 - **Pinning and sorting:** pin frequently used results and choose the list order.
 - **Choose the palette display:** keep the search palette on the built-in Mac screen or a selected external monitor/Sidecar display, independent of mouse position. If that display disconnects, the palette temporarily falls back to the Mac/primary screen; the selection is retained for reconnection.
-- **Native macOS appearance:** a compact translucent palette with adjustable background transparency, light/dark adaptation, and Japanese/English UI (system language or manual selection).
+- **Native macOS appearance:** a translucent palette with six visible search results on a typical display, adjustable background transparency, light/dark adaptation, and Japanese/English UI (system language or manual selection).
+- **App icons (v0.1.2):** see the real icons and names of up to four detected applications in each search result. The Space editor shows all detected apps. Missing icons fall back to a neutral blank icon with the app name.
 
 Names, tags and sets are saved **locally** on your Mac. No online account is needed.
 
@@ -53,12 +54,12 @@ If you previously installed ONIWA by dragging a DMG into Applications, quit it a
 
 ### DMG (manual installation)
 
-1. Download [ONIWA v0.1.1](https://github.com/hiro259/oniwa/releases/tag/v0.1.1) and open `ONIWA-v0.1.1-macos.dmg`.
+1. Download [ONIWA v0.1.2](https://github.com/hiro259/oniwa/releases/tag/v0.1.2) and open `ONIWA-v0.1.2-macos.dmg`.
 2. Drag **ONIWA.app** onto the **Applications** shortcut shown in the disk-image window.
 3. Open **ONIWA** from **Applications**. Allow **Accessibility** when the setup guide appears (System Settings → Privacy & Security → Accessibility); the guide includes a button to open the relevant settings.
 4. If needed, return to ONIWA and choose **Recheck**. You may need to quit and reopen ONIWA after granting permission. The menu-bar app uses `⌥ Option + Space` to open its search palette by default.
 
-To upgrade from v0.1.0 using the DMG, quit the running app before replacing it in Applications. If macOS keeps an older Accessibility approval, remove the old ONIWA entry and enable the newly installed copy.
+To upgrade from an older version using the DMG, quit the running app before replacing it in Applications. If macOS keeps an older Accessibility approval, remove the old ONIWA entry and enable the newly installed copy.
 
 ## Build and run from source
 
@@ -103,7 +104,7 @@ Existing installations preserve their previously chosen launch shortcut. If `⌥
 ONIWA uses macOS's ordinary Space movement shortcuts to perform switching. It needs both working **`Control+←/→` Mission Control shortcuts** and authorization to post keyboard events.
 
 - **First launch (v0.1.1 and later):** ONIWA checks Accessibility permission and the ability to post keyboard events, but shows only **Accessibility** as a permission to configure. The setup window offers **Open System Settings** and **Recheck** and shows the running app path. **Keyboard event posting: OK** appears only after a successful Space transition; it is not a second permission you must grant. Open the same guide from **Permissions and setup…** in the menu bar.
-- **Install location:** the **v0.1.1 DMG** shows ONIWA and an Applications shortcut side by side. Drag ONIWA onto Applications, then launch the installed copy. Installing into Applications is recommended, not strictly required. When ONIWA runs elsewhere, its setup window offers **Show this app in Finder** and **Open Applications**. Quit the app before moving it; reauthorize Accessibility if macOS still references the old path.
+- **Install location:** the **v0.1.2 DMG** shows ONIWA and an Applications shortcut side by side. Drag ONIWA onto Applications, then launch the installed copy. Installing into Applications is recommended, not strictly required. When ONIWA runs elsewhere, its setup window offers **Show this app in Finder** and **Open Applications**. Quit the app before moving it; reauthorize Accessibility if macOS still references the old path.
 - **A switch is blocked by permissions:** open **System Settings → Privacy & Security → Accessibility**, enable the *specific* `ONIWA.app` you are running, then restart the app if permission remains denied.
 - **The accessibility toggle is enabled but switching still fails:** check for an older `build/ONIWA.app` or `dist/ONIWA.app` entry in Accessibility settings. Remove the stale entry, add the actual installed copy (usually `/Applications/ONIWA.app`), and restart it. The app's permission guide shows its current path. If necessary, see [the app-specific TCC reset procedure](docs/RELEASING.md#permission-troubleshooting-development-vs-distribution-copies).
 - **The palette opens but Spaces do not change:** test physical `Control+←` / `Control+→` and confirm those shortcuts are enabled under Mission Control.
