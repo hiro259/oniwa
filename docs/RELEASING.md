@@ -1,8 +1,26 @@
-# ONIWA v0.1 — Developer ID signing and notarization
+# ONIWA — Developer ID signing, notarization and releases
 
-**Release history:** ONIWA v0.1.0 was published on 2026-11-04 as an Apple-notarized ZIP after M4 real-Mac testing. This document retains that historical ZIP workflow below. **v0.1.1 is in preparation** and adds a drag-to-Applications DMG workflow (see the new section near the end); it has not yet been packaged, notarized, or published. Never publish the pre-staple notarization-submission ZIP or an unstapled DMG.
+**Release history:** v0.1.0 was published on 2026-11-04 as an Apple-notarized ZIP. v0.1.1 was subsequently released as an Apple-notarized drag-to-Applications DMG, verified after a browser download with macOS quarantine/Gatekeeper, and distributed through the maintainer's Homebrew tap. The original v0.1.0 ZIP and v0.1.1 DMG procedures below are preserved as historical examples.
 
-This process runs **locally on the owner's Mac**. No signing certificate or notarization credentials are uploaded to the GitHub repository or stored in GitHub Actions.
+**Current preparation: v0.1.2 (build 3).** The app-icon and six-row search palette improvements from PR #29 are merged to `main`. This change only updates the version and release instructions; **v0.1.2 has not been signed, notarized, packaged, tagged or published yet**. Keep public README/Download and Homebrew Cask pointing to v0.1.1 until the new DMG is actually released.
+
+This process runs **locally on the owner's Mac**. No signing certificate or notarization credentials are uploaded to the GitHub repository or stored in GitHub Actions. Never publish a pre-staple submission ZIP, an unnotarized DMG, or a development build.
+
+## v0.1.2 release checklist (use the current main branch)
+
+1. Verify `Resources/Info.plist`: `CFBundleShortVersionString = 0.1.2`, `CFBundleVersion = 3`. Check out the latest `main` locally and confirm the source is clean and contains PR #29. Run `swift test`; preview `sh build.sh` without overwriting the Homebrew copy in `/Applications`.
+2. Check real-Mac behavior before distribution: palette top spacing, six full results, detected icons (and blank fallbacks), all-app editing view, Accessibility, fullscreen and two-display/Sidecar switches. Some edge cases remain unverified from PR #29; the signed build must be tested again.
+3. Ensure `ONIWA_DEVELOPER_ID_IDENTITY` is set **locally** to the already-installed Developer ID Application certificate SHA-1. Create the signed app and submission ZIP with `sh scripts/build-release.sh`. This regenerates only `dist/ONIWA.app` and generates `dist/ONIWA-v0.1.2-notarization.zip`; the archive is **not for public download**.
+4. Submit the **app ZIP** with `xcrun notarytool submit dist/ONIWA-v0.1.2-notarization.zip --keychain-profile "ONIWA-notary" --wait`. Only after **Accepted**, run `xcrun stapler staple dist/ONIWA.app` and `xcrun stapler validate dist/ONIWA.app`; confirm its signature and test the signed app.
+5. Run `sh scripts/build-dmg.sh` to create `dist/ONIWA-v0.1.2-macos.dmg` from the stapled app. Visually inspect the drag-to-Applications Finder layout. Separately submit the **DMG**: `xcrun notarytool submit dist/ONIWA-v0.1.2-macos.dmg --keychain-profile "ONIWA-notary" --wait`. Only after **Accepted**, staple and validate the DMG. **Never modify a stapled DMG**.
+6. Publish the DMG in GitHub Releases with tag `v0.1.2` pointing to the tested release commit. Browser-download the actual published asset, check quarantine, install, Gatekeeper, Space switching and permissions. Only then mark the release as Latest.
+7. **After public release succeeds**, change the README's latest download/installation references and update `hiro259/homebrew-tap/Casks/oniwa.rb` to version `0.1.2` with the **SHA-256 of the exact published DMG**. Test the Homebrew upgrade from v0.1.1 before considering the release complete. Do not pre-update the tap or replace the public v0.1.1 DMG.
+
+The older v0.1.0/v0.1.1 command examples below use their historical filenames; do not copy those version numbers into the v0.1.2 commands.
+
+---
+
+## Historical v0.1.0 and v0.1.1 signing procedures
 
 ## 1. Prepare the Mac
 
@@ -109,7 +127,7 @@ Extract the **public** ZIP into a fresh destination, then perform a normal launc
 Create the `v0.1.0` tag and GitHub Release with `ONIWA-v0.1.0-macos.zip`, installation instructions, macOS compatibility notes, private SkyLight dependency and known limitations. After uploading, download the published ZIP and repeat the Gatekeeper/first-run check. Homebrew Cask comes after the direct release is stable.
 
 
-## v0.1.1 — Drag-to-Applications DMG workflow (not yet verified)
+## v0.1.1 — Drag-to-Applications DMG workflow (historical, completed)
 
 For v0.1.1, prefer an Apple-notarized **DMG** with the ONIWA icon on the left and an **Applications** folder shortcut on the right. Users install ONIWA by dragging its icon onto Applications. A DMG is an optional presentation and copy mechanism, **not** a privileged installer. Opening the app inside the mounted DMG is not the recommended install method.
 
