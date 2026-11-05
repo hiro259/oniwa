@@ -16,7 +16,9 @@ extension PaletteDesign {
         case .monitorFocus: return CGSize(width: 560, height: 490)
         case .modernPrecision: return CGSize(width: 555, height: 490)
         case .pureMonochrome: return CGSize(width: 510, height: 455)
-        case .macOSNative: return CGSize(width: 535, height: 465)
+        // Six complete three-line rows on a typical display. Smaller screens
+        // are fitted to their available height by AppDelegate.
+        case .macOSNative: return CGSize(width: 535, height: 650)
         }
     }
 

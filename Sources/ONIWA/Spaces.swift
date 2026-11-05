@@ -3,6 +3,22 @@ import CoreGraphics
 import Foundation
 import ONIWACore
 
+/// A visible app detected from a window in one macOS Space.
+/// Keep the owner PID so the UI can request the real app icon without guessing by name.
+struct SpaceApp: Hashable {
+    let name: String
+    let processIdentifier: pid_t?
+
+    /// A paired Space can show the same app on both displays; show one icon.
+    static func unique(_ apps: [SpaceApp]) -> [SpaceApp] {
+        var seen = Set<String>()
+        return apps.filter {
+            let key = FuzzySearch.normalized($0.name)
+            return !key.isEmpty && seen.insert(key).inserted
+        }
+    }
+}
+
 struct SpaceEntry: Identifiable, Hashable {
     let identity: SpaceIdentity
     var id: String { identity.runtimeKey }
@@ -13,6 +29,7 @@ struct SpaceEntry: Identifiable, Hashable {
     let kind: Int
     let isCurrent: Bool
     let appNames: [String]
+    let apps: [SpaceApp]
 
     var defaultName: String {
         if kind == 4, let app = appNames.first { return app }
@@ -59,7 +76,8 @@ final class SpaceReader {
 
         // Switching polls only Space IDs: querying every window on every poll
         // would add avoidable latency on a Mac with many open windows.
-        let ownerNames = includeAppNames ? windowOwners(connection: connectionFn()) : [:]
+        let windowApps: [UInt64: [SpaceApp]] =
+            includeAppNames ? windowOwners(connection: connectionFn()) : [:]
         return raw.enumerated().compactMap { displayIndex, display in
             guard let displayID = display["Display Identifier"] as? String,
                   let spaceDicts = display["Spaces"] as? [[String: Any]] else { return nil }
@@ -75,34 +93,50 @@ final class SpaceReader {
                 // The numeric Space ID is used only while this Space exists.
                 let identity = SpaceIdentity(displayID: displayID, managedID: id, uuid: uuid)
                 let kind = (record["type"] as? NSNumber)?.intValue ?? 0
+                let apps = windowApps[id] ?? []
                 return SpaceEntry(identity: identity, systemID: id, displayID: displayID,
                                   displayName: name, index: index, kind: kind,
                                   isCurrent: current?.uint64Value == id,
-                                  appNames: ownerNames[id] ?? [])
+                                  appNames: apps.map(\.name), apps: apps)
             }
             return DisplayGroup(id: displayID, name: name,
                                 currentID: current?.uint64Value, spaces: spaces)
         }
     }
 
-    private func windowOwners(connection: Int32) -> [UInt64: [String]] {
+    private func windowOwners(connection: Int32) -> [UInt64: [SpaceApp]] {
         guard let windowsFn,
               let windows = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements],
                                                        kCGNullWindowID) as? [[String: Any]]
         else { return [:] }
 
-        var names: [UInt64: Set<String>] = [:]
+        // Keep each app's PID alongside its name. Multiple windows of one app
+        // still result in a single chip per Space, as in the old name-only UI.
+        var owners: [UInt64: [String: SpaceApp]] = [:]
         for info in windows {
             guard let id = info[kCGWindowNumber as String] as? NSNumber,
                   let appName = info[kCGWindowOwnerName as String] as? String,
+                  !appName.isEmpty,
                   (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
-                  let spaceIDs = windowsFn(connection, 0x7, [id.intValue] as CFArray) as? [NSNumber]
+                  let spaceIDs = windowsFn(connection, 0x7, [id.intValue] as CFArray) as? [NSNumber],
+                  spaceIDs.count == 1
             else { continue }
-            for spaceID in spaceIDs where spaceIDs.count == 1 {
-                names[spaceID.uint64Value, default: []].insert(appName)
+            let rawPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+            let pid = rawPID.flatMap { $0 > 0 ? $0 : nil }
+            let app = SpaceApp(name: appName, processIdentifier: pid)
+            for spaceID in spaceIDs {
+                let key = spaceID.uint64Value
+                // Prefer an entry with a usable PID if an earlier window lacked it.
+                if owners[key]?[appName] == nil
+                    || (owners[key]?[appName]?.processIdentifier == nil && pid != nil) {
+                    owners[key, default: [:]][appName] = app
+                }
             }
         }
-        return names.mapValues { $0.sorted() }
+        return owners.mapValues { perSpace in
+            // Match the previous name-only reader's ordering exactly.
+            perSpace.values.sorted { $0.name < $1.name }
+        }
     }
 
     private func displayName(_ uuid: String, fallback: Int) -> String {

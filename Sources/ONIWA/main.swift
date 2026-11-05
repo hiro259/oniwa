@@ -37,7 +37,7 @@ final class SearchState: ObservableObject {
     @Published var tagsDraft: [String] = []
     @Published var editingTagIndex: Int?
     @Published var keywordInput = ""
-    @Published var editingAppNames: [String] = []
+    @Published var editingApps: [SpaceApp] = []
     @Published var hasEditingLabel = false
     @Published var editingIsSessionOnly = false
     @Published var labelRevision = 0
@@ -413,7 +413,7 @@ final class SearchState: ObservableObject {
         tagsDraft = label?.searchTags ?? []
         editingTagIndex = nil
         keywordInput = ""
-        editingAppNames = space.appNames
+        editingApps = space.apps
         hasEditingLabel = label != nil
         editingIsSessionOnly = space.identity.persistentKey == nil
         editing = true
@@ -781,6 +781,19 @@ struct SearchView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
+                                    let pairApps = SpaceApp.unique(first.apps + second.apps)
+                                    if !pairApps.isEmpty {
+                                        HStack(spacing: 4) {
+                                            ForEach(Array(pairApps.prefix(4)), id: \.name) { app in
+                                                SpaceAppChip(app: app)
+                                            }
+                                            if pairApps.count > 4 {
+                                                Text("+\(pairApps.count - 4)")
+                                                    .font(.caption2).foregroundStyle(.secondary)
+                                            }
+                                        }
+                                        .lineLimit(1)
+                                    }
                                     if design.showsMonitorBadge {
                                         Label(t("2画面セット", "Two-display set"), systemImage: "display.2")
                                             .font(.caption2.weight(.medium))
@@ -923,18 +936,16 @@ struct SearchView: View {
                                 // Saved search keywords and current apps appear
                                 // as tags, but only the manual tags are persisted.
                                 let manualTags = state.labels.label(for: space.identity)?.searchTags ?? []
-                                let appTags = FuzzySearch.appTags(from: space.appNames,
-                                                                 excluding: manualTags)
-                                if !manualTags.isEmpty || !appTags.isEmpty {
+                                if !manualTags.isEmpty || !space.apps.isEmpty {
                                     HStack(spacing: 4) {
                                         ForEach(Array(manualTags.prefix(2)), id: \.self) { tag in
                                             SpaceTag(title: tag, isAutomatic: false, design: design)
                                         }
-                                        ForEach(Array(appTags.prefix(2)), id: \.self) { app in
-                                            SpaceTag(title: app, isAutomatic: true, design: design)
+                                        ForEach(Array(space.apps.prefix(4)), id: \.name) { app in
+                                            SpaceAppChip(app: app)
                                         }
                                         let extra = max(0, manualTags.count - 2)
-                                            + max(0, appTags.count - 2)
+                                            + max(0, space.apps.count - 4)
                                         if extra > 0 {
                                             Text("+\(extra)").font(.caption2)
                                                 .foregroundStyle(.secondary)
@@ -1047,8 +1058,16 @@ struct SearchView: View {
                     .buttonStyle(.borderless)
             }
         }
-        .padding(design.contentPadding)
-        .frame(width: design.panelSize.width, height: design.panelSize.height)
+        // The native panel already uses .fullSizeContentView. Reclaim the
+        // otherwise unused titlebar safe-area inset instead of shrinking rows.
+        // Leave a small top margin so the header doesn't touch the window edge.
+        .padding(.horizontal, design.contentPadding)
+        .padding(.bottom, design.contentPadding)
+        .padding(.top, design == .macOSNative ? 14 : design.contentPadding)
+        // The window owns the height. Avoid clipping the results when the
+        // selected display is smaller than the preferred six-row palette.
+        .frame(width: design.panelSize.width)
+        .frame(maxHeight: .infinity)
         .background {
             if design == .macOSNative {
                 MacOSNativePaletteSurface()
@@ -1058,6 +1077,7 @@ struct SearchView: View {
                 design.canvasColor
             }
         }
+        .ignoresSafeArea(.container, edges: design == .macOSNative ? .top : [])
         .onAppear { isSearchFocused = true }
         .onChange(of: paletteRaw) { _ in
             // The text field is replaced when changing between legacy/refined
@@ -1145,17 +1165,20 @@ struct SearchView: View {
                 }
                 Text(t("タグをクリックして編集、×で削除", "Click a tag to edit; × to remove"))
                     .font(.caption).foregroundStyle(.secondary)
-                if !state.editingAppNames.isEmpty {
-                    Text(t("このSpaceのアプリ", "Apps in this Space"))
+                if !state.editingApps.isEmpty {
+                    Text(t("このSpaceで検出されたアプリ", "Apps detected in this Space"))
                         .font(.subheadline.weight(.medium))
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(FuzzySearch.appTags(from: state.editingAppNames,
-                                                        excluding: state.tagsDraft), id: \.self) { app in
-                                SpaceTag(title: app, isAutomatic: true)
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 80, maximum: 100),
+                                                    spacing: 8)],
+                                  alignment: .leading, spacing: 10) {
+                            ForEach(state.editingApps, id: \.name) { app in
+                                SpaceAppTile(app: app)
                             }
                         }
+                        .padding(.vertical, 2)
                     }
+                    .frame(maxHeight: 190)
                     Text(t("アプリ名は検索にも使用されます。", "App names are included in search automatically."))
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -1772,6 +1795,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Center in the usable region, not the full screen behind the Dock or
         // menu bar. Clamp in case a display has an unusually small resolution.
         let available = screen.visibleFrame
+        // On smaller displays (including Sidecar), fit within the usable
+        // screen; the result list keeps scrolling rather than being clipped.
+        let preferred = PaletteDesign.active().panelSize
+        let fittedHeight = min(preferred.height, max(240, available.height - 24))
+        panel.setContentSize(NSSize(width: preferred.width, height: fittedHeight))
         let width = panel.frame.width
         let height = panel.frame.height
         let x = max(available.minX, min(available.midX - width / 2, available.maxX - width))
