@@ -33,12 +33,32 @@ Names, tags and sets are saved **locally** on your Mac. No online account is nee
 
 ## Install ONIWA
 
+### Homebrew (Apple Silicon)
+
+Install ONIWA with the [maintainer's Homebrew tap](https://github.com/hiro259/homebrew-tap):
+
+```sh
+brew install --cask hiro259/tap/oniwa
+```
+
+The cask installs the same Apple-notarized DMG into Applications. A separate `brew tap` command is not needed for a direct install. Review the third-party [cask definition](https://github.com/hiro259/homebrew-tap/blob/main/Casks/oniwa.rb) before trusting it.
+
+To upgrade a Homebrew-managed installation:
+
+```sh
+brew upgrade --cask hiro259/tap/oniwa
+```
+
+If you previously installed ONIWA by dragging a DMG into Applications, quit it and move the existing `/Applications/ONIWA.app` out of Applications before the Homebrew install. Keep a backup until the Homebrew version launches successfully; Homebrew may otherwise refuse to overwrite the unmanaged app.
+
+### DMG (manual installation)
+
 1. Download [ONIWA v0.1.1](https://github.com/hiro259/oniwa/releases/tag/v0.1.1) and open `ONIWA-v0.1.1-macos.dmg`.
 2. Drag **ONIWA.app** onto the **Applications** shortcut shown in the disk-image window.
 3. Open **ONIWA** from **Applications**. Allow **Accessibility** when the setup guide appears (System Settings → Privacy & Security → Accessibility); the guide includes a button to open the relevant settings.
 4. If needed, return to ONIWA and choose **Recheck**. You may need to quit and reopen ONIWA after granting permission. The menu-bar app uses `⌥ Option + Space` to open its search palette by default.
 
-To upgrade from v0.1.0, quit the running app before replacing it in Applications. If macOS keeps an older Accessibility approval, remove the old ONIWA entry and enable the newly installed copy.
+To upgrade from v0.1.0 using the DMG, quit the running app before replacing it in Applications. If macOS keeps an older Accessibility approval, remove the old ONIWA entry and enable the newly installed copy.
 
 ## Build and run from source
 
