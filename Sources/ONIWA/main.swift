@@ -1059,7 +1059,10 @@ struct SearchView: View {
             }
         }
         .padding(design.contentPadding)
-        .frame(width: design.panelSize.width, height: design.panelSize.height)
+        // The window owns the height. Avoid clipping the results when the
+        // selected display is smaller than the preferred six-row palette.
+        .frame(width: design.panelSize.width)
+        .frame(maxHeight: .infinity)
         .background {
             if design == .macOSNative {
                 MacOSNativePaletteSurface()
@@ -1786,6 +1789,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Center in the usable region, not the full screen behind the Dock or
         // menu bar. Clamp in case a display has an unusually small resolution.
         let available = screen.visibleFrame
+        // On smaller displays (including Sidecar), fit within the usable
+        // screen; the result list keeps scrolling rather than being clipped.
+        let preferred = PaletteDesign.active().panelSize
+        let fittedHeight = min(preferred.height, max(240, available.height - 24))
+        panel.setContentSize(NSSize(width: preferred.width, height: fittedHeight))
         let width = panel.frame.width
         let height = panel.frame.height
         let x = max(available.minX, min(available.midX - width / 2, available.maxX - width))
