@@ -47,7 +47,7 @@ final class DetectedAppTagTests: XCTestCase {
 
     func testEmptyAndInvalidAppsCannotRemoveOtherTags() {
         var tags = ["Finder", "work"]
-        for app in ["", "  ", "Finder\\nSuspicious", "\\u{0000}Finder"] {
+        for app in ["", "  ", "Finder\nSuspicious", "\u{0000}Finder"] {
             click(app, in: &tags)
             XCTAssertEqual(tags, ["Finder", "work"])
             XCTAssertNil(DetectedAppTag.matchingIndex(of: app, in: tags))
