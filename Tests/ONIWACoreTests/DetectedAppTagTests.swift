@@ -104,6 +104,27 @@ final class DetectedAppTagTests: XCTestCase {
             .label(for: identity)?.searchTags, ["existing", "Google Chrome"])
     }
 
+    func testRemovingSavedAppTagIsDraftOnlyUntilSave() {
+        let suite = "oniwa.detected-app-tag.remove.test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let identity = SpaceIdentity(displayID: "built-in", managedID: 10, uuid: "UUID-A")
+        let store = SpaceLabelStore(defaults: defaults)
+        store.update(identity, name: "work", tags: ["Finder", "important"])
+
+        var draft = store.label(for: identity)!.searchTags
+        click("finder", in: &draft)
+        XCTAssertEqual(draft, ["important"])
+        // Cancelling the editor does not mutate persisted data.
+        XCTAssertEqual(SpaceLabelStore(defaults: defaults)
+            .label(for: identity)?.searchTags, ["Finder", "important"])
+
+        // Saving the draft commits just the requested tag removal.
+        store.update(identity, name: "work", tags: draft)
+        XCTAssertEqual(SpaceLabelStore(defaults: defaults)
+            .label(for: identity)?.searchTags, ["important"])
+    }
+
     func testNoChangeToOtherSpaceTags() {
         let suite = "oniwa.detected-app-tag.other.test.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
