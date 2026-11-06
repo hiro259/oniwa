@@ -3,6 +3,57 @@ import XCTest
 @testable import ONIWACore
 
 final class DetectedAppTagTests: XCTestCase {
+    /// Mirrors the editor's click path: remove a matching tag or add it.
+    private func click(_ appName: String, in tags: inout [String]) {
+        if let index = DetectedAppTag.matchingIndex(of: appName, in: tags) {
+            tags.remove(at: index)
+        } else {
+            tags = DetectedAppTag.adding(appName, to: tags)
+        }
+    }
+
+    func testSecondClickRemovesTagAndThirdClickAddsItBack() {
+        var tags = ["existing"]
+        click("Google Chrome", in: &tags)
+        XCTAssertEqual(tags, ["existing", "Google Chrome"])
+        XCTAssertTrue(DetectedAppTag.isAdded("Google Chrome", to: tags))
+
+        click("Google Chrome", in: &tags)
+        XCTAssertEqual(tags, ["existing"])
+        XCTAssertFalse(DetectedAppTag.isAdded("Google Chrome", to: tags))
+
+        click("Google Chrome", in: &tags)
+        XCTAssertEqual(tags, ["existing", "Google Chrome"])
+    }
+
+    func testExistingManualTagCanBeRemovedByClickWithEquivalentSpelling() {
+        var tags = ["work", "Ｇｏｏｇｌｅ Ｃｈｒｏｍｅ", "Finder"]
+        XCTAssertEqual(DetectedAppTag.matchingIndex(of: "google chrome", in: tags), 1)
+        click("google chrome", in: &tags)
+        XCTAssertEqual(tags, ["work", "Finder"])
+        click("Google Chrome", in: &tags)
+        XCTAssertEqual(tags, ["work", "Finder", "Google Chrome"])
+    }
+
+    func testClickingOneAppDoesNotChangeOtherTags() {
+        var tags = ["Finder", "Safari", "work"]
+        click("Finder", in: &tags)
+        XCTAssertEqual(tags, ["Safari", "work"])
+        click("Terminal", in: &tags)
+        XCTAssertEqual(tags, ["Safari", "work", "Terminal"])
+        click("Terminal", in: &tags)
+        XCTAssertEqual(tags, ["Safari", "work"])
+    }
+
+    func testEmptyAndInvalidAppsCannotRemoveOtherTags() {
+        var tags = ["Finder", "work"]
+        for app in ["", "  ", "Finder\\nSuspicious", "\\u{0000}Finder"] {
+            click(app, in: &tags)
+            XCTAssertEqual(tags, ["Finder", "work"])
+            XCTAssertNil(DetectedAppTag.matchingIndex(of: app, in: tags))
+        }
+    }
+
     func testClickAddsMultiWordAppNameWithoutSplittingIt() {
         XCTAssertEqual(DetectedAppTag.adding("Google Chrome", to: ["dev"]),
                        ["dev", "Google Chrome"])
