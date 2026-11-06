@@ -27,5 +27,7 @@ jobs:
           grep -q "ONIWA_DEVELOPER_ID_IDENTITY" /tmp/oniwa-release-preflight.log
       - name: Swift unit tests
         run: swift test
+      - name: Typecheck read-only Space UUID diagnostic
+        run: swiftc -typecheck scripts/diagnose-space-uuids.swift
       - name: Build macOS app
         run: sh build.sh
