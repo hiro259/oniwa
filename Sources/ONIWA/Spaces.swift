@@ -85,13 +85,23 @@ final class SpaceReader {
             let currentDictionary = display["Current Space"] as? [String: Any]
             let current = (currentDictionary?["ManagedSpaceID"] as? NSNumber)
                 ?? (currentDictionary?["id64"] as? NSNumber)
+            // The original macOS desktop may have an explicitly empty UUID.
+            // Only grant it a display-scoped anchor when the live topology
+            // contains exactly one UUID-less normal desktop for this display.
+            let records = spaceDicts.map {
+                SpaceUUIDRecord(kind: ($0["type"] as? NSNumber)?.intValue ?? -1,
+                                rawUUID: $0["uuid"] as? String)
+            }
+            let anchorIndex = UUIDlessDesktopPolicy.anchorIndex(in: records)
             let spaces: [SpaceEntry] = spaceDicts.enumerated().compactMap { index, record in
                 guard let number = (record["ManagedSpaceID"] as? NSNumber)
                         ?? (record["id64"] as? NSNumber) else { return nil }
                 let id = number.uint64Value
-                let uuid = record["uuid"] as? String ?? ""
-                // The numeric Space ID is used only while this Space exists.
-                let identity = SpaceIdentity(displayID: displayID, managedID: id, uuid: uuid)
+                let uuid = record["uuid"] as? String
+                // Never use a numeric ID or list index as a saved identity.
+                let identity = SpaceIdentity(displayID: displayID, managedID: id,
+                                             uuid: uuid,
+                                             isUUIDlessDesktopAnchor: anchorIndex == index)
                 let kind = (record["type"] as? NSNumber)?.intValue ?? 0
                 let apps = windowApps[id] ?? []
                 return SpaceEntry(identity: identity, systemID: id, displayID: displayID,
