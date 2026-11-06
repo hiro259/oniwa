@@ -240,7 +240,9 @@ final class SearchState: ObservableObject {
     }
 
     var pairEligibleSpaces: [SpaceEntry] {
-        all.filter { $0.identity.persistentKey != nil }
+        // Two-display sets still require real UUIDs. The special blank-UUID
+        // desktop anchor is for names/tags/pins only, not pair targets.
+        all.filter { $0.identity.uuid != nil }
     }
 
     var pairSecondChoices: [SpaceEntry] {

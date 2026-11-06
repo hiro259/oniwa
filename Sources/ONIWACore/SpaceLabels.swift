@@ -1,20 +1,26 @@
 import Foundation
 
-/// A Space's numeric ID identifies it while it exists; the UUID is the only
-/// identity we trust for persistence across launches. Neither its position
-/// nor a fullscreen app name is a safe persistent identity.
+/// A Space's numeric ID identifies it while it exists; regular persistence
+/// uses its UUID. macOS's original desktop may instead have a unique empty
+/// UUID: that case receives an explicit display-scoped anchor from the reader.
+/// Neither an index nor a numeric ManagedSpaceID is ever stored as identity.
 public struct SpaceIdentity: Hashable {
     public let displayID: String
     public let managedID: UInt64
     public let uuid: String?
+    /// Only SpaceReader may opt in after verifying exactly one blank-UUID
+    /// normal desktop on this display. Other UUID-less spaces stay transient.
+    public let isUUIDlessDesktopAnchor: Bool
 
-    public init(displayID: String, managedID: UInt64, uuid: String?) {
+    public init(displayID: String, managedID: UInt64, uuid: String?,
+                isUUIDlessDesktopAnchor: Bool = false) {
         self.displayID = displayID
         self.managedID = managedID
         let normalized = uuid?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         self.uuid = (normalized?.isEmpty == false) ? normalized : nil
+        self.isUUIDlessDesktopAnchor = self.uuid == nil && isUUIDlessDesktopAnchor
     }
 
     /// Used for UI selection only. Moving a Space in Mission Control does not
@@ -23,11 +29,15 @@ public struct SpaceIdentity: Hashable {
         "runtime:\(displayID):\(managedID)"
     }
 
-    /// Scoped by monitor, so a duplicate UUID on a different display cannot
-    /// accidentally inherit that monitor's name.
+    /// Scoped by monitor, so duplicates on other displays cannot inherit data.
+    /// The unique blank-UUID desktop has its own key namespace, never a made-up
+    /// UUID (which would accidentally become a valid target for saved sets).
     public var persistentKey: String? {
-        guard let uuid else { return nil }
-        return "space.v2:\(displayID):\(uuid)"
+        if let uuid { return "space.v2:\(displayID):\(uuid)" }
+        if isUUIDlessDesktopAnchor {
+            return "space.uuidless-primary.v1:\(displayID)"
+        }
+        return nil
     }
 
     /// v1 stored UUIDs without a monitor scope. A v1 label is eligible for
@@ -77,9 +87,9 @@ public struct SpaceLabel: Codable, Equatable {
     public var isEmpty: Bool { name.isEmpty && searchTags.isEmpty }
 }
 
-/// Persists only identities backed by a nonempty Space UUID. For Spaces with
-/// no UUID, names are useful only for this running ONIWA process and are
-/// explicitly discarded at launch rather than migrating across Space reorder.
+/// Persists UUID-backed identities and the explicitly recognized unique
+/// blank-UUID desktop on each display. Other missing-UUID spaces receive
+/// session-only names and never inherit labels based on their position.
 public final class SpaceLabelStore {
     private static let v2Key = "oniwa.customLabels.v2"
     private static let v1Key = "oniwa.customLabels.v1"
