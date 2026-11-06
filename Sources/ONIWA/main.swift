@@ -471,11 +471,17 @@ final class SearchState: ObservableObject {
         editingTagIndex = nil
     }
 
-    /// Convert a detected app to a manual tag only when the user clicks it.
-    /// Keep an unfinished tag-field edit untouched; only Save writes to disk.
-    func addDetectedAppTag(_ name: String) {
+    /// Clicking a detected app toggles its manual search tag in the draft.
+    /// Removal uses the same path as a tag chip's X so an in-progress manual
+    /// tag edit maintains its correct index (or is cancelled if removed).
+    /// Save remains the only operation that persists the change.
+    func toggleDetectedAppTag(_ name: String) {
         guard editing, editingApps.contains(where: { $0.name == name }) else { return }
-        tagsDraft = DetectedAppTag.adding(name, to: tagsDraft)
+        if let index = DetectedAppTag.matchingIndex(of: name, in: tagsDraft) {
+            removeTag(at: index)
+        } else {
+            tagsDraft = DetectedAppTag.adding(name, to: tagsDraft)
+        }
     }
 
     func isDetectedAppTagged(_ name: String) -> Bool {
@@ -1213,18 +1219,19 @@ struct SearchView: View {
                             ForEach(state.editingApps, id: \.name) { app in
                                 let tagged = state.isDetectedAppTagged(app.name)
                                 Button {
-                                    state.addDetectedAppTag(app.name)
+                                    state.toggleDetectedAppTag(app.name)
                                 } label: {
                                     SpaceAppTile(app: app, isTagged: tagged)
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(DetectedAppTag.tagName(from: app.name) == nil)
                                 .help(tagged
-                                    ? t("検索タグに追加済み", "Already added to search tags")
+                                    ? t("クリックして「\(app.name)」を検索タグから削除",
+                                        "Click to remove \(app.name) from search tags")
                                     : t("クリックして「\(app.name)」を検索タグに追加",
                                         "Click to add \(app.name) to search tags"))
                                 .accessibilityLabel(tagged
-                                    ? t("検索タグに追加済み: \(app.name)", "Tag already added: \(app.name)")
+                                    ? t("検索タグを削除: \(app.name)", "Remove search tag: \(app.name)")
                                     : t("検索タグに追加: \(app.name)", "Add search tag: \(app.name)"))
                             }
                         }
