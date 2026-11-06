@@ -13,10 +13,16 @@ public enum DetectedAppTag {
         return SpaceLabel.cleanedTags([appName]).first
     }
 
-    public static func isAdded(_ appName: String, to tags: [String]) -> Bool {
-        guard let tag = tagName(from: appName) else { return false }
+    /// Use the same normalized comparison for both the added indicator and
+    /// removal. This also matches tags created manually with different casing.
+    public static func matchingIndex(of appName: String, in tags: [String]) -> Int? {
+        guard let tag = tagName(from: appName) else { return nil }
         let target = FuzzySearch.normalized(tag)
-        return tags.contains { FuzzySearch.normalized($0) == target }
+        return tags.firstIndex { FuzzySearch.normalized($0) == target }
+    }
+
+    public static func isAdded(_ appName: String, to tags: [String]) -> Bool {
+        matchingIndex(of: appName, in: tags) != nil
     }
 
     /// Idempotent under case/width/diacritic variations; preserves existing
