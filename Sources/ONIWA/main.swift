@@ -471,6 +471,17 @@ final class SearchState: ObservableObject {
         editingTagIndex = nil
     }
 
+    /// Convert a detected app to a manual tag only when the user clicks it.
+    /// Keep an unfinished tag-field edit untouched; only Save writes to disk.
+    func addDetectedAppTag(_ name: String) {
+        guard editing, editingApps.contains(where: { $0.name == name }) else { return }
+        tagsDraft = DetectedAppTag.adding(name, to: tagsDraft)
+    }
+
+    func isDetectedAppTagged(_ name: String) -> Bool {
+        DetectedAppTag.isAdded(name, to: tagsDraft)
+    }
+
     func removeTag(at index: Int) {
         guard tagsDraft.indices.contains(index) else { return }
         tagsDraft.remove(at: index)
@@ -1200,7 +1211,21 @@ struct SearchView: View {
                                                     spacing: 8)],
                                   alignment: .leading, spacing: 10) {
                             ForEach(state.editingApps, id: \.name) { app in
-                                SpaceAppTile(app: app)
+                                let tagged = state.isDetectedAppTagged(app.name)
+                                Button {
+                                    state.addDetectedAppTag(app.name)
+                                } label: {
+                                    SpaceAppTile(app: app, isTagged: tagged)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(DetectedAppTag.tagName(from: app.name) == nil)
+                                .help(tagged
+                                    ? t("検索タグに追加済み", "Already added to search tags")
+                                    : t("クリックして「\(app.name)」を検索タグに追加",
+                                        "Click to add \(app.name) to search tags"))
+                                .accessibilityLabel(tagged
+                                    ? t("検索タグに追加済み: \(app.name)", "Tag already added: \(app.name)")
+                                    : t("検索タグに追加: \(app.name)", "Add search tag: \(app.name)"))
                             }
                         }
                         .padding(.vertical, 2)
