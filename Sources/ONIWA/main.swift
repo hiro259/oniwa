@@ -46,6 +46,7 @@ final class SearchState: ObservableObject {
     @Published var shortcutDescription = "⌥ Space"
     @Published var pairRevision = 0
     @Published var orderingRevision = 0
+    @Published var searchFocusRequest = 0
     @Published var pairEditing = false
     @Published var pairNameDraft = ""
     @Published var pairFirstKey = ""
@@ -61,6 +62,13 @@ final class SearchState: ObservableObject {
     var hidePanel: (() -> Void)?
     var onPermissionFailure: (() -> Void)?
     var onVerifiedSpaceSwitch: (() -> Void)?
+
+    /// A new request is emitted for each palette presentation. A Bool focus
+    /// binding alone cannot reliably reassert focus after an NSPanel is reused.
+    func requestSearchFocus() {
+        guard !editing && !pairEditing else { return }
+        searchFocusRequest &+= 1
+    }
 
     var all: [SpaceEntry] { groups.flatMap(\.spaces) }
     var results: [SpaceEntry] {
@@ -1079,6 +1087,23 @@ struct SearchView: View {
         }
         .ignoresSafeArea(.container, edges: design == .macOSNative ? .top : [])
         .onAppear { isSearchFocused = true }
+        .onChange(of: state.searchFocusRequest) { request in
+            // The view survives orderOut/makeKeyAndOrderFront; onAppear is
+            // not guaranteed on each shortcut invocation. Remove any stale
+            // focus binding, then restore it after the panel becomes key.
+            isSearchFocused = false
+            DispatchQueue.main.async {
+                guard state.searchFocusRequest == request,
+                      let panel = NSApp.keyWindow as? SearchPanel,
+                      PaletteFocusPolicy.shouldRestoreSearchFocus(
+                          isVisible: panel.isVisible,
+                          isKeyWindow: panel.isKeyWindow,
+                          isEditingSpace: state.editing,
+                          isEditingPair: state.pairEditing)
+                else { return }
+                isSearchFocused = true
+            }
+        }
         .onChange(of: paletteRaw) { _ in
             // The text field is replaced when changing between legacy/refined
             // appearances; restore keyboard-first search immediately.
@@ -1331,10 +1356,11 @@ final class SearchPanel: NSPanel {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let state = SearchState()
     private var shortcut: GlobalShortcut?
     private var panel: SearchPanel?
+    private var isAwaitingPaletteFocus = false
     private var statusItem: NSStatusItem?
     private let permissionSetup = PermissionSetupController()
     private var keyboardMonitor: Any?
@@ -1403,7 +1429,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         statusItem = item
         rebuildStatusMenu()
-        state.hidePanel = { [weak self] in self?.panel?.orderOut(nil) }
+        state.hidePanel = { [weak self] in self?.dismissPanel() }
         state.showPanel = { [weak self] in self?.presentPanel(resetSearch: false) }
         state.onPermissionFailure = { [weak self] in self?.permissionSetup.show() }
         state.onVerifiedSpaceSwitch = { [weak self] in self?.permissionSetup.recordSuccessfulSwitch() }
@@ -2165,7 +2191,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state.activateSelected()
             return nil
         case kVK_Escape:
-            panel?.orderOut(nil)
+            dismissPanel()
             return nil
         default:
             return event
@@ -2197,9 +2223,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func openPanel() { presentPanel() }
 
+    private func dismissPanel() {
+        isAwaitingPaletteFocus = false
+        panel?.orderOut(nil)
+    }
+
     private func togglePanel() {
-        if panel?.isVisible == true { panel?.orderOut(nil) }
+        if panel?.isVisible == true { dismissPanel() }
         else { presentPanel() }
+    }
+
+    /// Wait until AppKit has really made our panel key before requesting
+    /// SwiftUI text-field focus. The pending flag prevents re-focusing the
+    /// search field when an editor or another window later becomes active.
+    func windowDidBecomeKey(_ notification: Notification) {
+        guard let panel, let window = notification.object as? NSWindow,
+              window === panel else { return }
+        restoreSearchFocusIfReady()
+    }
+
+    private func restoreSearchFocusIfReady() {
+        guard isAwaitingPaletteFocus, let panel,
+              PaletteFocusPolicy.shouldRestoreSearchFocus(
+                  isVisible: panel.isVisible,
+                  isKeyWindow: panel.isKeyWindow,
+                  isEditingSpace: state.editing,
+                  isEditingPair: state.pairEditing)
+        else { return }
+        isAwaitingPaletteFocus = false
+        state.requestSearchFocus()
     }
 
     private func presentPanel(resetSearch: Bool = true) {
@@ -2215,6 +2267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      backing: .buffered, defer: false)
             window.title = "ONIWA"
             window.isReleasedWhenClosed = false
+            window.delegate = self
             window.level = .floating
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.contentView = NSHostingView(rootView: SearchView(state: state))
@@ -2222,8 +2275,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             applyPaletteWindowStyle(PaletteDesign.active())
         }
         positionPaletteOnPreferredDisplay()
+        isAwaitingPaletteFocus = !state.editing && !state.pairEditing
         NSApp.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
+        // Handles the already-key case; normal activation also calls
+        // windowDidBecomeKey when the panel actually acquires key status.
+        restoreSearchFocusIfReady()
     }
 }
 
