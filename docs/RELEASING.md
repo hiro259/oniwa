@@ -1,10 +1,43 @@
 # ONIWA — Developer ID signing, notarization and releases
 
-**Release history:** v0.1.0 was published on 2026-11-04 as an Apple-notarized ZIP. v0.1.1 was subsequently released as an Apple-notarized drag-to-Applications DMG, verified after a browser download with macOS quarantine/Gatekeeper, and distributed through the maintainer's Homebrew tap. The original v0.1.0 ZIP and v0.1.1 DMG procedures below are preserved as historical examples.
+**Release history:** v0.1.0 (notarized ZIP), v0.1.1 (notarized drag-to-Applications DMG), and v0.1.2 (notarized DMG with app icons / six visible results) have been released. The published v0.1.2 DMG was checked after a browser download and the Homebrew tap was updated.
 
-**Current preparation: v0.1.2 (build 3).** The app-icon and six-row search palette improvements from PR #29 are merged to `main`. This change only updates the version and release instructions; **v0.1.2 has not been signed, notarized, packaged, tagged or published yet**. Keep public README/Download and Homebrew Cask pointing to v0.1.1 until the new DMG is actually released.
+**Current preparation: v0.1.3 (build 4).** Scope is deliberately limited to Issue #31 (pin the unique blank-UUID primary Desktop), #32 (restore search focus when reopening the palette), and #35 (click detected app icons to toggle search tags, plus Space editor layout fix). All three fixes were merged to `main` before release preparation. This branch only updates version/release instructions. **v0.1.3 is not yet signed, notarized, packaged, tagged or published.** Until the new GitHub Release has been verified, keep the public README download links and Homebrew Cask pointing to v0.1.2.
 
 This process runs **locally on the owner's Mac**. No signing certificate or notarization credentials are uploaded to the GitHub repository or stored in GitHub Actions. Never publish a pre-staple submission ZIP, an unnotarized DMG, or a development build.
+
+## v0.1.3 release checklist
+
+1. **Merge and sync the final release commit.** Verify the v0.1.3 preparation PR has passed GitHub Actions, review its diff, and merge it to `main`. Check out the updated `main` on the owner's Mac, ensure the working tree is clean, and verify `Resources/Info.plist`: `CFBundleShortVersionString = 0.1.3`, `CFBundleVersion = 4`. Run `swift test` and `sh build.sh`. The default development build must not replace `/Applications/ONIWA.app`.
+2. **Make the Developer ID-signed candidate.** On the owner's Mac, confirm the existing Developer ID Application certificate in `security find-identity -v -p codesigning`, and set the local `ONIWA_DEVELOPER_ID_IDENTITY` environment variable to its 40-character SHA-1. Run `sh scripts/build-release.sh` to produce `dist/ONIWA.app` and `dist/ONIWA-v0.1.3-notarization.zip`. Inspect signing identity, Hardened Runtime and secure timestamp with `codesign -dv --verbose=4 dist/ONIWA.app`. **The ZIP is for notarization submission, not publication.**
+3. **Test the *signed* v0.1.3 candidate on the real Mac before Apple submission.** Quit all other ONIWA copies first, launch `dist/ONIWA.app`, check the actual running path and verify:
+   - Issue #31: built-in Desktop 1 pin/unpin/re-pin, persistence after relaunch; names and tags; other pinned Spaces are unchanged.
+   - Issue #32: invoke the palette repeatedly with the configured shortcut from another app and after Space switching; type immediately without clicking the search field.
+   - Issue #35: click a detected app icon to add, click again to remove, verify selection indicator, then save/relaunch. Add enough tags to confirm all app icons and names are fully visible and footer buttons remain accessible.
+   - Baseline: direct Space search, ↑↓/Enter/Esc, a fullscreen Space, and a Sidecar two-display set. Check permissions (Accessibility / keyboard-event posting) for **this signed copy**.
+4. **Notarize the app.** Only after the signed candidate passes testing:
+   ```fish
+   xcrun notarytool submit dist/ONIWA-v0.1.3-notarization.zip \
+     --keychain-profile "ONIWA-notary" --wait
+   ```
+   Proceed **only** on `Accepted`, then:
+   ```fish
+   xcrun stapler staple dist/ONIWA.app
+   xcrun stapler validate dist/ONIWA.app
+   codesign --verify --deep --strict --verbose=2 dist/ONIWA.app
+   ```
+5. **Create and notarize the DMG.** Run `sh scripts/build-dmg.sh` (requires `create-dmg`) to make `dist/ONIWA-v0.1.3-macos.dmg`. Inspect the Finder layout: ONIWA icon left, Applications link right. Submit the **DMG separately**:
+   ```fish
+   xcrun notarytool submit dist/ONIWA-v0.1.3-macos.dmg \
+     --keychain-profile "ONIWA-notary" --wait
+   ```
+   After `Accepted`, run `xcrun stapler staple dist/ONIWA-v0.1.3-macos.dmg`, `xcrun stapler validate dist/ONIWA-v0.1.3-macos.dmg`, `codesign --verify --verbose=2 dist/ONIWA-v0.1.3-macos.dmg`, and `hdiutil verify dist/ONIWA-v0.1.3-macos.dmg`. Do not modify the stapled DMG.
+6. **Publish only the verified artifact.** Calculate `shasum -a 256 dist/ONIWA-v0.1.3-macos.dmg`. Create tag `v0.1.3` at the tested main commit and a GitHub Release using the prepared `docs/RELEASE-NOTES-v0.1.3.md` text. Upload **only** the stapled and validated `ONIWA-v0.1.3-macos.dmg` as the downloadable asset. Browser-download the published DMG, confirm quarantine/Gatekeeper, test drag-to-Applications and core switching, then finalize the release.
+7. **Update the public channel only after the published DMG is checked.** Change README's latest links and install instructions to v0.1.3. Update `hiro259/homebrew-tap/Casks/oniwa.rb` with `version "0.1.3"` and the SHA-256 from **the exact published DMG**; test `brew update` and `brew upgrade --cask hiro259/tap/oniwa`. Do not update the tap early.
+
+## Historical v0.1.2 checklist (completed)
+
+The following checklist is retained only as a record of the previous release; its present/future-tense wording reflects the state during preparation.
 
 ## v0.1.2 release checklist (use the current main branch)
 
