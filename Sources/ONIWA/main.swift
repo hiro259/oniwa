@@ -1151,104 +1151,118 @@ struct SearchView: View {
         }
         .onExitCommand { state.hidePanel?() }
         .sheet(isPresented: $state.editing) {
+            let availableScreenHeight = NSApp.keyWindow?.screen?.visibleFrame.height
+                ?? NSScreen.main?.visibleFrame.height ?? 760
             VStack(alignment: .leading, spacing: 12) {
-                Text(t("名前と検索タグ", "Name and search tags")).font(.headline)
-                TextField(t("表示名（例：趣味）", "Name (e.g. Personal)"), text: $state.nameDraft)
-                    .focused($isNameInputFocused)
-                    .modifier(NativeSheetFieldSurface(
-                        enabled: design == .macOSNative, isFocused: isNameInputFocused))
-                Text(t("検索タグ", "Search tags")).font(.subheadline.weight(.medium))
-                TextField(state.editingTagIndex == nil
-                          ? t("タグを入力してEnterで追加", "Enter a tag and press Return")
-                          : t("編集してEnterで確定", "Edit tag and press Return"), text: $state.keywordInput)
-                    .focused($isTagInputFocused)
-                    .modifier(NativeSheetFieldSurface(
-                        enabled: design == .macOSNative, isFocused: isTagInputFocused))
-                    .onSubmit {
-                        state.commitPendingKeyword()
-                        isTagInputFocused = true
-                    }
-                if !state.tagsDraft.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(state.tagsDraft.indices, id: \.self) { index in
-                                // Both edit and delete controls belong to the
-                                // SAME pill. The X is intentionally inside its
-                                // right edge, not a floating control between tags.
-                                HStack(spacing: 5) {
-                                    Button {
-                                        state.beginTagEdit(at: index)
-                                        isTagInputFocused = true
-                                    } label: {
-                                        Text("#" + state.tagsDraft[index])
-                                            .lineLimit(1)
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(t("名前と検索タグ", "Name and search tags")).font(.headline)
+                        TextField(t("表示名（例：趣味）", "Name (e.g. Personal)"), text: $state.nameDraft)
+                            .focused($isNameInputFocused)
+                            .modifier(NativeSheetFieldSurface(
+                                enabled: design == .macOSNative, isFocused: isNameInputFocused))
+                        Text(t("検索タグ", "Search tags")).font(.subheadline.weight(.medium))
+                        TextField(state.editingTagIndex == nil
+                                  ? t("タグを入力してEnterで追加", "Enter a tag and press Return")
+                                  : t("編集してEnterで確定", "Edit tag and press Return"), text: $state.keywordInput)
+                            .focused($isTagInputFocused)
+                            .modifier(NativeSheetFieldSurface(
+                                enabled: design == .macOSNative, isFocused: isTagInputFocused))
+                            .onSubmit {
+                                state.commitPendingKeyword()
+                                isTagInputFocused = true
+                            }
+                        if !state.tagsDraft.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    ForEach(state.tagsDraft.indices, id: \.self) { index in
+                                        // Both edit and delete controls belong to the
+                                        // SAME pill. The X is intentionally inside its
+                                        // right edge, not a floating control between tags.
+                                        HStack(spacing: 5) {
+                                            Button {
+                                                state.beginTagEdit(at: index)
+                                                isTagInputFocused = true
+                                            } label: {
+                                                Text("#" + state.tagsDraft[index])
+                                                    .lineLimit(1)
+                                            }
+                                            .help(t("クリックして編集", "Click to edit tag"))
+                                            Button {
+                                                state.removeTag(at: index)
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.tertiary)
+                                            }
+                                            .help(t("「\(state.tagsDraft[index])」を削除", "Remove \(state.tagsDraft[index])"))
+                                            .accessibilityLabel(t("タグ「\(state.tagsDraft[index])」を削除", "Remove tag \(state.tagsDraft[index])"))
+                                        }
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .buttonStyle(.plain)
+                                        .padding(.horizontal, 9)
+                                        .padding(.vertical, 5)
+                                        .background(
+                                            Color.secondary.opacity(state.editingTagIndex == index ? 0.20 : 0.10),
+                                            in: Capsule()
+                                        )
                                     }
-                                    .help(t("クリックして編集", "Click to edit tag"))
-                                    Button {
-                                        state.removeTag(at: index)
-                                    } label: {
-                                        Image(systemName: "xmark.circle.fill")
-                                            .font(.caption2)
-                                            .foregroundStyle(.tertiary)
-                                    }
-                                    .help(t("「\(state.tagsDraft[index])」を削除", "Remove \(state.tagsDraft[index])"))
-                                    .accessibilityLabel(t("タグ「\(state.tagsDraft[index])」を削除", "Remove tag \(state.tagsDraft[index])"))
                                 }
-                                .font(.caption2)
+                            }
+                        }
+                        Text(t("タグをクリックして編集、×で削除", "Click a tag to edit; × to remove"))
+                            .font(.caption).foregroundStyle(.secondary)
+                        if !state.editingApps.isEmpty {
+                            Text(t("このSpaceで検出されたアプリ", "Apps detected in this Space"))
+                                .font(.subheadline.weight(.medium))
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 80, maximum: 100),
+                                                        spacing: 8)],
+                                      alignment: .leading, spacing: 10) {
+                                ForEach(state.editingApps, id: \.name) { app in
+                                    let tagged = state.isDetectedAppTagged(app.name)
+                                    Button {
+                                        state.toggleDetectedAppTag(app.name)
+                                    } label: {
+                                        SpaceAppTile(app: app, isTagged: tagged)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(DetectedAppTag.tagName(from: app.name) == nil)
+                                    .help(tagged
+                                        ? t("クリックして「\(app.name)」を検索タグから削除",
+                                            "Click to remove \(app.name) from search tags")
+                                        : t("クリックして「\(app.name)」を検索タグに追加",
+                                            "Click to add \(app.name) to search tags"))
+                                    .accessibilityLabel(tagged
+                                        ? t("検索タグを削除: \(app.name)", "Remove search tag: \(app.name)")
+                                        : t("検索タグに追加: \(app.name)", "Add search tag: \(app.name)"))
+                                }
+                            }
+                            .padding(.vertical, 2)
+                            .frame(minHeight: SpaceEditorLayout.minimumAppGridHeight, alignment: .top)
+                            .fixedSize(horizontal: false, vertical: true)
+                            Text(t("アプリ名は検索にも使用されます。", "App names are included in search automatically."))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if state.editingIsSessionOnly {
+                            Text(t("このSpaceの名前は、ONIWAを終了するまで有効です。", "This Space's name is kept only until ONIWA quits."))
+                                .font(.caption)
                                 .foregroundStyle(.secondary)
-                                .buttonStyle(.plain)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 5)
-                                .background(
-                                    Color.secondary.opacity(state.editingTagIndex == index ? 0.20 : 0.10),
-                                    in: Capsule()
-                                )
-                            }
+                                .fixedSize(horizontal: false, vertical: true)
                         }
+                        Text(t("⌘S で保存 · Esc でキャンセル", "⌘S Save · Esc Cancel"))
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(t("タグをクリックして編集、×で削除", "Click a tag to edit; × to remove"))
-                    .font(.caption).foregroundStyle(.secondary)
-                if !state.editingApps.isEmpty {
-                    Text(t("このSpaceで検出されたアプリ", "Apps detected in this Space"))
-                        .font(.subheadline.weight(.medium))
-                    ScrollView(.vertical, showsIndicators: true) {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 80, maximum: 100),
-                                                    spacing: 8)],
-                                  alignment: .leading, spacing: 10) {
-                            ForEach(state.editingApps, id: \.name) { app in
-                                let tagged = state.isDetectedAppTagged(app.name)
-                                Button {
-                                    state.toggleDetectedAppTag(app.name)
-                                } label: {
-                                    SpaceAppTile(app: app, isTagged: tagged)
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(DetectedAppTag.tagName(from: app.name) == nil)
-                                .help(tagged
-                                    ? t("クリックして「\(app.name)」を検索タグから削除",
-                                        "Click to remove \(app.name) from search tags")
-                                    : t("クリックして「\(app.name)」を検索タグに追加",
-                                        "Click to add \(app.name) to search tags"))
-                                .accessibilityLabel(tagged
-                                    ? t("検索タグを削除: \(app.name)", "Remove search tag: \(app.name)")
-                                    : t("検索タグに追加: \(app.name)", "Add search tag: \(app.name)"))
-                            }
-                        }
-                        .padding(.vertical, 2)
-                    }
-                    .frame(maxHeight: 190)
-                    Text(t("アプリ名は検索にも使用されます。", "App names are included in search automatically."))
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if state.editingIsSessionOnly {
-                    Text(t("このSpaceの名前は、ONIWAを終了するまで有効です。", "This Space's name is kept only until ONIWA quits."))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Text(t("⌘S で保存 · Esc でキャンセル", "⌘S Save · Esc Cancel"))
-                    .font(.caption2).foregroundStyle(.secondary)
+                .frame(height: SpaceEditorLayout.scrollHeight(
+                    tagCount: state.tagsDraft.count,
+                    appCount: state.editingApps.count,
+                    isSessionOnly: state.editingIsSessionOnly,
+                    availableScreenHeight: availableScreenHeight))
+                // Footer remains visible while tags and app tiles scroll.
+                Divider()
                 HStack {
                     if state.hasEditingLabel {
                         Button(t("名前とタグを削除", "Remove name and tags")) { state.deleteLabel() }
