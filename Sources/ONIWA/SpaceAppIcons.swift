@@ -79,22 +79,44 @@ struct SpaceAppChip: View {
     }
 }
 
-/// All detected applications in the Space editor. Long lists can scroll.
+/// An interactive detected app tile in the Space editor. The surrounding
+/// Button performs the tag operation; this view only indicates its state.
 @MainActor
 struct SpaceAppTile: View {
     let app: SpaceApp
+    let isTagged: Bool
+    @State private var isHovered = false
 
     var body: some View {
         VStack(spacing: 5) {
-            SpaceAppIcon(app: app, size: 38)
+            ZStack(alignment: .topTrailing) {
+                SpaceAppIcon(app: app, size: 38)
+                if isTagged {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color.accentColor)
+                        .offset(x: 5, y: -4)
+                        .accessibilityHidden(true)
+                }
+            }
             Text(app.name)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(isTagged ? Color.accentColor : Color.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity)
         }
-        .help(app.name)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(isTagged ? Color.accentColor.opacity(0.12)
+                    : (isHovered ? Color.secondary.opacity(0.10) : Color.clear))
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .onHover { isHovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(app.name)
     }
