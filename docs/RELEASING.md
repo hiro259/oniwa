@@ -2,9 +2,17 @@
 
 **Release history:** v0.1.0 (notarized ZIP), v0.1.1 (notarized drag-to-Applications DMG), and v0.1.2 (notarized DMG with app icons / six visible results) have been released. The published v0.1.2 DMG was checked after a browser download and the Homebrew tap was updated.
 
-**Current preparation: v0.1.3 (build 4).** Scope is deliberately limited to Issue #31 (pin the unique blank-UUID primary Desktop), #32 (restore search focus when reopening the palette), and #35 (click detected app icons to toggle search tags, plus Space editor layout fix). All three fixes were merged to `main` before release preparation. This branch only updates version/release instructions. **v0.1.3 is not yet signed, notarized, packaged, tagged or published.** Until the new GitHub Release has been verified, keep the public README download links and Homebrew Cask pointing to v0.1.2.
+**Current release: v0.1.3 (build 4).** Scope is limited to Issue #31 (pin the unique blank-UUID primary Desktop), #32 (restore search focus when reopening the palette), and #35 (click detected app icons to toggle search tags, plus Space editor layout fix). All three fixes were merged to `main` before release preparation. The owner built and tested the Developer ID-signed app, and Apple accepted the app and DMG notarization submissions. The owner verified the browser-downloaded v0.1.3 DMG with quarantine/Gatekeeper and core app behavior. **GitHub Release v0.1.3 is published; README and Homebrew Cask were updated to the published DMG.** At the time of this record, GitHub's `releases/latest` still points to v0.1.2, and the Homebrew upgrade from v0.1.2 has not yet been independently verified.
 
 This process runs **locally on the owner's Mac**. No signing certificate or notarization credentials are uploaded to the GitHub repository or stored in GitHub Actions. Never publish a pre-staple submission ZIP, an unnotarized DMG, or a development build.
+
+## v0.1.3 publication record (2026-11-09)
+
+- Release commit: `9dfbee89782f22113a67edcb8b357b369e5f0d13`; GitHub Release: https://github.com/hiro259/oniwa/releases/tag/v0.1.3
+- Release asset: `ONIWA-v0.1.3-macos.dmg`, SHA-256 `fc1511a7e7ac7a56a171dea76814a2a6989e2d7cc04ff843f73d8ea6f6606d85` (confirmed against the GitHub-hosted asset digest).
+- User confirmed the signed v0.1.3 app passed all six release smoke tests, that both app and DMG notarizations were accepted and stapled/validated, and that the downloaded DMG passed Gatekeeper and practical app tests.
+- Public README download/install references and `hiro259/homebrew-tap/Casks/oniwa.rb` were updated to v0.1.3 with the matching published-asset digest.
+- Pending checks: mark v0.1.3 as GitHub's **Latest** (it still resolves to v0.1.2 at record time); confirm `brew upgrade --cask hiro259/tap/oniwa` installs and launches the updated app.
 
 ## v0.1.3 release checklist
 
